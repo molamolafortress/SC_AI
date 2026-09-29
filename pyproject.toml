@@ -1,0 +1,12 @@
+[project]
+name = "sc-ai-sidecar"
+version = "0.1.0"
+description = "LLM strategy sidecar for a Brood War bot body (McRave/UAlbertaBot)"
+requires-python = ">=3.11"
+dependencies = ["anthropic>=1.9", "pydantic>=2", "fastapi", "uvicorn", "httpx", "orjson", "pyyaml"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

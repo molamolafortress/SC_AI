@@ -1,0 +1,13 @@
+{
+  "map": "Fighting Spirit",
+  "_note": "PLACEHOLDER. Replace with output of coach/map_knowledge.py + human review. Positions are empty until tools/map_dump.py runs.",
+  "matchup_defaults": {
+    "ZvT": {"wall_natural": "none", "third": "B", "sunken_spots": ["nat_mineral_front"]},
+    "ZvP": {"wall_natural": "partial_2", "third": "B", "sunken_spots": ["nat_choke_inner"]}
+  },
+  "walls": {
+    "partial_2": {"choke": "natural_main", "buildings": ["hatchery", "evolution_chamber", "creep_colony"], "tight": {"zergling": false, "zealot": true}}
+  },
+  "expansions": {"A": {"pos": null, "distance_from_nat": null}, "B": {"pos": null, "distance_from_nat": null}, "C": {"pos": null, "distance_from_nat": null}},
+  "notes": ["Placeholder notes: 4-player map, natural has one main choke; third B is toward the closest corner base."]
+}

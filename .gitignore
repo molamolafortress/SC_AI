@@ -1,0 +1,9 @@
+third_party/
+logs/
+replays/
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+eval/results/
+build/

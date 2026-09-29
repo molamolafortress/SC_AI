@@ -1,0 +1,16 @@
+{
+  "matchup": "ZvT",
+  "openings": {
+    "12hatch_11pool": {"summary": "Economic. Hatch at 12, pool at 11, gas after. Safe vs 1-rax expand.", "risk": "8-rax, proxy"},
+    "9pool_speed": {"summary": "Early lings + speed. Good vs greedy Terran, weak economy.", "risk": "wall + bunker"},
+    "overpool": {"summary": "Pool at 9 after overlord, hatch after. Balanced safety/economy.", "risk": "none major"},
+    "3hatch_muta": {"summary": "Mid-game transition: 3 hatch, lair, spire, mutalisk harass.", "requires": ["lair", "spire"]},
+    "3hatch_hydra": {"summary": "Mid-game transition: hydra den, range/speed, hydra timing.", "requires": ["hydralisk_den"]},
+    "lurker_contain": {"summary": "Lurkers at Terran natural to buy time for 3rd/4th.", "requires": ["lurker_aspect"]}
+  },
+  "counters": {
+    "marine_medic_bio": ["lurker", "zergling", "defiler"],
+    "mech_tank_vulture": ["mutalisk", "guardian", "zergling flank", "ultralisk late"],
+    "wraith": ["hydralisk", "spore_colony", "scourge"]
+  }
+}
