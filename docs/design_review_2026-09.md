@@ -21,7 +21,9 @@
 
 가장 먼저 정할 결정(5장): 자체 Python 봇을 처음부터 짓느냐(A), 기존 오픈소스 저그 봇(Steamhammer/McRave)을 몸체로 쓰고 LLM 두뇌를 얹느냐(B). 유지되는 Python BWAPI 바인딩이 없다는 사실 때문에 A는 브리지 작업이 먼저 필요하다. 이 보고서는 **B로 시작해 가설을 검증한 뒤 A로 옮기는 것**을 추천한다.
 
-문서 구성: 1장 현재 설계 리뷰와 사실 확인, 2장 모델·API 변화와 비용, 3장 선행 연구, 4장 개선 설계안(v0.5), 5장 구현 방식 비교, 6장 로드맵, 7장 리스크와 열린 질문, 8장 바로 할 일, 부록 참고 자료.
+2026-09-29 추가 검토(9장): OpenBW를 주 엔진으로 두는 결정과 Brood War Bench(프론티어 LLM이 BWAPI 명령을 직접 내리는 벤치마크, 전부 초보 수준)를 검증했다. 구조는 바뀌지 않고, 플랫폼(OpenBW + Windows 검증 레인), Phase 0~1의 완료 기준(OpenBW에는 내장 AI가 없다), 브리지 방식, 오픈소스 봇 후보군, APM 제한 프로파일이 조정된다.
+
+문서 구성: 1장 현재 설계 리뷰와 사실 확인, 2장 모델·API 변화와 비용, 3장 선행 연구, 4장 개선 설계안(v0.5), 5장 구현 방식 비교, 6장 로드맵, 7장 리스크와 열린 질문, 8장 바로 할 일, 9장 추가 검토(OpenBW 결정, Brood War Bench, APM 제한), 부록 참고 자료.
 
 ---
 
@@ -70,7 +72,7 @@
 **(b) BWAPI / OpenBW / 헤드리스 실행 — 신뢰도 높음**
 - 최신 릴리스는 BWAPI 4.4.0(2019). BWAPI 5는 `develop` 브랜치(CMake, protobuf 메시지, 크로스플랫폼 지향)에만 있고 미출시다. 의존하지 말 것.
 - BWAPI는 브루드워 1.16.1(Windows)만 지원한다. Remastered는 미지원(2026-09에 ShieldBattery의 실험적 브리지가 나왔으나 대회 불가, 디버그 DLL 필요).
-- OpenBW(오픈소스 엔진 재구현)는 Linux에서 헤드리스로 돈다. BWAPI 호환 포크는 4.2.0 API 수준이고 원본 MPQ 3개가 필요하다. 자기 보고 기준 약 1,800프레임/초(실시간의 약 75배). JBWAPI와 Stardust 개발 환경이 여기서 돈다.
+- OpenBW(오픈소스 엔진 재구현)는 Linux에서 헤드리스로 돈다. BWAPI 호환 포크는 4.2.0 API 수준이고 원본 MPQ 3개가 필요하다. 자기 보고 기준 약 1,800프레임/초(실시간의 약 75배). JBWAPI와 Stardust 개발 환경이 여기서 돈다. 내장 컴퓨터 AI가 없어 상대는 항상 다른 봇 프로세스여야 하고, BWAPI 포크에 client mode가 없어 봇은 AI 모듈로 로드한다(9.2).
 - Windows 경로: bwheadless + sc-docker(Wine, BASIL 포크가 2025-07까지 유지, BWAPI 4.4.0 지원). 대회용 토너먼트 매니저는 Windows 전용.
 - 실무 분리: 빠른 자가대전·평가는 OpenBW(Linux), 대회·실제 환경 검증은 1.16.1 + BWAPI 4.4.0(Windows).
 
@@ -156,7 +158,7 @@ Batch API는 모든 토큰(캐시 포함) 50% 할인. 캐시 쓰기는 5분 TTL 
 
 ## 3. 선행 연구가 말해주는 것 (2023~2026)
 
-이 프로젝트와 같은 시도(LLM 전략 + 스크립트/RL 실행)는 StarCraft II 쪽에서 2023년부터 많이 나왔다. 브루드워/BWAPI에 LLM을 붙인 논문은 찾지 못했고, 실험적 하네스 하나(MingleCraft)만 있다. 아래는 설계 결정과 직접 관련된 결과만 추렸다. 수치 일부는 논문 요약 발췌 기준이므로 인용 시 원문 확인이 필요하다.
+이 프로젝트와 같은 시도(LLM 전략 + 스크립트/RL 실행)는 StarCraft II 쪽에서 2023년부터 많이 나왔다. 브루드워/BWAPI에 LLM을 붙인 논문은 찾지 못했다. 실험적 하네스(MingleCraft)와 2026-09에 공개된 Brood War Bench(9.1)가 있다. 아래는 설계 결정과 직접 관련된 결과만 추렸다. 수치 일부는 논문 요약 발췌 기준이므로 인용 시 원문 확인이 필요하다.
 
 ### 3.1 LLM은 매크로(전략)에서만 쓸모가 있었다
 
@@ -347,6 +349,8 @@ B에서의 구체 연결점:
 
 A를 고를 경우: rasdasd/starcraft-ai의 방식(TCP + FlatBuffers, 1.16.1과 OpenBW 양쪽)을 참고해 브리지를 먼저 만들고, Tactics는 Steamhammer/UAlbertaBot의 매니저 구조를 그대로 옮긴다. BWEM/BWEB/FAP은 C++이므로 브리지 프로세스 쪽에 두고 결과(리전, 확장 위치, 건물 위치 후보, 전투 예측)만 Python에 넘기는 편이 낫다.
 
+OpenBW를 주 엔진으로 두면 후보와 브리지 방식이 좁혀진다. 9.2를 본다.
+
 ---
 
 ## 6. 실행 계획 (로드맵 v2: 수직 슬라이스)
@@ -355,8 +359,8 @@ A를 고를 경우: rasdasd/starcraft-ai의 방식(TCP + FlatBuffers, 1.16.1과 
 
 | Phase | 기간 | 산출물 | 완료 기준 |
 |---|---|---|---|
-| **0. 환경** | 1주 | 게임 + BWAPI 실행 환경, 브리지 선택 확정(5장), 헤드리스 실행 스크립트, 저장소 구조, `CLAUDE.md` | 명령 한 줄로 내장 AI와 1게임이 돌고 로그(JSONL)와 리플레이가 저장된다 |
-| **1. Tracer bullet** | 2주 | State Manager(Tracker/Timeline/Logger), 결정적 Tactics(고정 오프닝 1개 + 단순 생산/확장/배치), 스크립트 Micro(어택무브 + 후퇴 임계), Command Queue. **LLM 없음** | 내장 AI(저그/테란/프로토스) 상대 승률 80% 이상. 이것이 baseline |
+| **0. 환경** | 1주 | OpenBW + BWAPI 포크 빌드와 MPQ 준비, 참고 봇 1~2개 빌드, 2인스턴스 대전 스크립트, 브리지 선택 확정(5장), Windows 1.16.1 검증 레인, 저장소 구조, `CLAUDE.md` | 명령 한 줄로 헤드리스 1게임(참고 봇 상대)이 돌고 로그(JSONL)와 리플레이가 저장된다 |
+| **1. Tracer bullet** | 2주 | State Manager(Tracker/Timeline/Logger), 결정적 Tactics(고정 오프닝 1개 + 단순 생산/확장/배치), 스크립트 Micro(어택무브 + 후퇴 임계), Command Queue. **LLM 없음** | Windows 레인: 내장 AI(저그/테란/프로토스) 상대 승률 80% 이상. OpenBW 레인: 포트된 참고 봇(UAlbertaBot/ZZZKBot 수준) 상대 게임이 끝까지 돌고 승률이 측정된다(9.2). 이것이 baseline |
 | **2. 평가 하네스** | 1~2주 | N게임 자동 대전, 지표 집계, 상대 풀(내장 AI + 오픈소스 봇 1~2개), 결과 대시보드 | `run_eval --games 30 --opponent X` 한 번으로 승률 표가 나온다 |
 | **3. Strategy LLM** | 2주 | Summarizer, Plan Ledger, Validator, Strategy 호출(이벤트 기반, structured outputs, 캐시), Lockstep 모드 | 같은 상대 30게임 A/B: 고정 빌드 vs LLM 전략. 승률·비용·flip-flop 횟수 비교 |
 | **4. 코치 루프** | 2주 | 게임 로그 → Opus 5.5(Batch) 사후 분석 → 수정 제안 → 하네스 회귀 → 채택. Claude Code용 워크플로 | 코치 제안으로 승률이 오른 사례 3건 이상 |
@@ -415,8 +419,74 @@ SC_AI/
 
 1. 이 보고서를 검토하고 열린 질문 1~4에 답을 정한다.
 2. Blueprint를 v0.5로 갱신한다: Visual Inspection 삭제, Tactics를 결정적 코드로, Offline Loop·Eval Harness 추가, 모델 표 갱신, 날짜 수정.
-3. Phase 0 착수: 게임 환경과 브리지를 세팅하고 "1게임 자동 실행 + 로그 저장"을 만든다.
+3. Phase 0 착수: OpenBW 헤드리스 환경(MPQ, BWAPI 포크, 참고 봇 1~2개, 2인스턴스 LAN 대전)과 브리지를 세팅하고 "1게임 자동 실행 + 로그 저장"을 만든다. Windows 1.16.1 검증 레인은 병행 준비한다(9.2).
 4. 이후 Phase 1은 Claude Code에 맡길 수 있는 크기의 작업으로 쪼갠다(State Manager → Production → Squad → Micro 순).
+
+## 9. 추가 검토: OpenBW 주 엔진 결정과 Brood War Bench (2026-09-29 추가)
+
+다른 세션에서 논의된 네 가지(OpenBW 헤드리스, APM 제한 래퍼, 화면 인식용 자동 라벨링, "Opus 5.5가 스타를 한다"는 이야기)를 검증하고 이 보고서에 미치는 영향을 정리했다. 1차 출처(bw.swerdlow.dev, Hacker News 스레드)는 이 환경에서 접근이 막혀 2차 보도와 관련 저장소 README로 확인했다.
+
+### 9.1 Brood War Bench: 사실 확인
+
+| 항목 | 확인 결과 |
+|---|---|
+| 무엇 | Ben Swerdlow가 19개 에이전트 설정을 브루드워 라운드로빈으로 171경기 대전. 2026-09-19 공개, Hacker News 201점/81댓글 |
+| 게임 연결 | 화면 캡처가 아니라 **BWAPI로 최소한의 관측·명령 인터페이스**를 제공. 에이전트(Claude Code, Codex 등 코딩 에이전트)가 `issue_commands` 류 도구로 명령 묶음을 발행. Freestyle 클라우드 VM에서 병렬 실행, 엔진 데이터와 양쪽 에이전트 로그 저장 |
+| 실시간성 | "모델이 생각하는 동안 시계는 멈추지 않는다." 예: Grok 4.6(xhigh)은 한 게임에서 추론 토큰 11,138개를 쓰고 43분 동안 명령 묶음 6개만 발행, 전투 유닛 0 |
+| 결과 | Codex Astra(xhigh) 18전 전승, Claude Fable 83.3%(3위), Codex 5.6 Sol(medium) 72.2%, Claude Opus 5 66.7%, Grok 4.6(xhigh) 11.1%, Claude Haiku 0승 |
+| 저자 결론 | 어느 설정도 초보 수준을 넘지 못함. 경제 유지, 지속 생산, 업그레이드, 병력 합류 공격 같은 "느린 일"에 약함. 옛 모델은 RTS를 턴제처럼 플레이하다 밀렸고, 최신 모델도 같은 함정에 빠지지만 생각의 비용을 더 의식 |
+| Opus 5.5 | 벤치마크에 **없다.** 참가한 것은 Opus 5. "Opus 5.5가 스타를 한다"는 말은 최신 모델 이름이 섞인 것 |
+| 미확인 | Opus 5 게임당 약 20.78달러라는 수치는 다른 세션의 인용이며 1차 출처를 직접 보지 못했다. 하네스 소스 공개 여부도 확인하지 못했다 |
+
+이 설계에 대한 시사점:
+
+1. **실증 데이터가 생겼다.** LLM이 BWAPI 명령을 직접 내리는 방식은 프론티어 모델로도 초보 수준이다. v0.4의 Tactics-SLM(모델이 명령을 직접 출력)과 같은 구조가 실제로 실패한다는 증거이고, v0.5의 "결정적 실행 계층 위에 LLM" 분리가 필요한 이유다.
+2. **"생각하는 동안 죽는다."** Strategy는 비동기로 부르고 늦은 결과는 폐기하며, 실행 계층은 LLM 응답이 없어도 계속 플레이해야 한다(7장 API 장애 항목과 같은 원칙).
+3. **추론 effort는 양날이다.** xhigh로 전승한 설정(Codex Astra)이 있는 반면 낮은 effort가 나은 경우도 보고됐다. 4.3의 "정기 점검은 low, 빌드 전환은 medium~high" 분리를 유지하고, 6.1 A/B에 effort 축을 추가한다.
+4. **비용 격차.** 직접 조작 방식은 게임당 수십 달러(2차 인용) 수준이고 이 보고서의 제안 구성은 1~2달러다(2.4). 평가를 자주 돌릴 수 있느냐의 차이다.
+5. **비교군으로는 낮은 기준이다.** "LLM 직접 조작 에이전트를 이긴다"는 목표로 삼지 않는다. 오픈소스 봇 상대 승률(6장)을 유지한다.
+6. **인터페이스 참고.** Brood War Bench의 "관측 요약 + 명령 묶음 도구"는 4.3의 Strategy 입출력과 닮았지만 출력이 저수준(유닛 명령)이다. 이 설계는 매크로 지시만 출력하고 저수준 명령은 코드가 만든다.
+
+### 9.2 OpenBW를 주 엔진으로 할 때의 함의
+
+확인된 사실(저장소 README와 이슈 기준):
+
+- **내장 컴퓨터 AI가 없다.** 싱글플레이 상대는 가만히 있는다. 대전 상대는 항상 다른 봇 프로세스여야 하고, 두 인스턴스를 LAN 모드로 붙여야 한다(`OPENBW_LAN_MODE`).
+- **OpenBW의 BWAPI 포크에는 client mode가 없다.** 봇은 AI 모듈(`.so`)로 로드된다. Python 두뇌를 쓰려면 C++ shim 모듈이 필수다. JBWAPI(JVM)는 네이티브로 동작한다.
+- **속도**: Python 왕복을 포함해 약 1,800프레임/초(frame_skip=2), 실시간의 약 75배. 15분 게임이 12초 안팎이다.
+- **렌더링**: 기본은 헤드리스이고 `OPENBW_ENABLE_UI=1`로 SDL2 뷰어를 함께 빌드할 수 있다.
+- **C++ 봇 포팅 사례**: lukecameron/starcraft-ai는 McRave, ZZZKBot, UAlbertaBot, Stardust를 OpenBW(ARM64 macOS)에서 무인 대전시키고 있다. McRave 포트는 BWAPI 4.4.0 헤더로 전부 컴파일된다. 즉 C++ 봇도 패치를 거치면 OpenBW에서 돈다.
+- **게임 데이터**: 원본 MPQ가 필요하다. rasdasd/starcraft-ai는 David Churchill이 블리자드 허가로 AI 연구용으로 재배포하는 `scbw_bwapi440.zip`(1.16.1 + BWAPI 4.4.0 + 맵)을 쓴다.
+- **참고 저장소의 라이선스**: rasdasd/starcraft-ai, lukecameron/starcraft-ai 모두 LICENSE 파일이 없다. 코드를 복사하지 말고 구조만 참고한다.
+
+설계·로드맵 반영:
+
+| 영향 | 변경 |
+|---|---|
+| 두 레인 | Linux/OpenBW = 개발·평가·코치 루프(컨테이너에서 Claude Code가 자율 실행 가능). Windows 1.16.1 + BWAPI 4.4.0 = 실제 게임 검증, 내장 AI, 사람 상대, 대회 규칙 확인 |
+| Phase 0 | OpenBW + BWAPI 포크 빌드, MPQ 준비, 참고 봇 1~2개 빌드, 2인스턴스 LAN 대전 스크립트, 리플레이 저장. 이것이 첫 주의 목표다 |
+| Phase 1 완료 기준 | "내장 AI 상대 80%"는 Windows 레인에서만 잰다. OpenBW 레인에서는 포트된 참고 봇(UAlbertaBot/ZZZKBot 수준) 상대 게임이 끝까지 돌고 승률이 측정되는 것이 기준이다 |
+| 브리지(Option A) | rasdasd 방식(C++ shim 모듈 + 길이 접두 FlatBuffers/TCP + Python 락스텝, frame_skip)이 OpenBW와 1.16.1에서 같은 코드로 검증됐다. 라이선스가 없으므로 같은 구조로 다시 만든다 |
+| Option B 후보 | OpenBW 실행이 확인된 봇으로 좁힌다: McRave(C++, 저그 강함, 포트 사례), ZZZKBot(저그, LGPLv3), UAlbertaBot(저그 설정, 2021 중단), JBWAPI 기반 PurpleWave(네이티브). Steamhammer는 OpenBW 실행 사례를 찾지 못했다 |
+| 결정론 | 같은 시드와 명령이면 같은 결과다. LLM은 비결정적이므로 "기록된 전략 재생" 모드를 만들어 Tactics/Micro 회귀는 LLM 없이 결정론적으로 돌린다 |
+| 평가 규모 | LLM 없이 100게임 ≈ 20분. LLM 포함 락스텝은 호출 지연이 지배해 Strategy 40회 × 5초 ≈ 게임당 3~4분. 여전히 실시간보다 빠르다 |
+
+### 9.3 APM 제한과 "인간 조건" 프로파일
+
+- 다른 세션의 제안(토큰 버킷 APM, 선택도 액션으로 계산, 부대 선택 12기 제한, 관측 지연 5~8프레임, 스크립트 자동화도 같은 예산에서 차감)은 모두 옳은 원칙이고, 에이전트가 우회할 수 없도록 **Command Queue와 Input 경계에서 강제**해야 한다. 4.6의 "프레임당 명령 수 상한"을 이 프로파일로 확장한다.
+- 언제 켜는가는 7장 열린 질문 1(목표)에 달렸다. 봇 상대 승률이나 사람 상대 플레이가 목표면 기본 off다(대회에도 APM 제한은 없고 프레임 시간 제한만 있다). "사람과 공정한 조건" 연구가 목표면 on이다. 어느 쪽이든 프로파일을 설정으로 두고 평가 결과에 항상 기록한다.
+- LLM 전략층은 APM을 거의 쓰지 않는다(매크로 지시만). APM 예산은 Tactics/Micro의 트레이드오프이고, 스크립트 마이크로를 설계할 때 "액션당 기대 가치"를 지표로 삼는다. rasdasd의 `ApmMeter`/`apm_budget`(기본 400) 설계가 참고가 된다.
+
+### 9.4 RL 커리큘럼과 화면 인식 트랙
+
+- RL 커리큘럼(소규모 교전 → 중반 교전 → 풀게임, 공개 봇 사다리 → 자가대전)은 타당하다. 다만 로드맵 위치는 그대로 Phase 5(선택)다. OpenBW 속도 덕분에 "가능"해졌을 뿐 "우선"이 된 것은 아니다. 풀게임 RL은 Pluto가 보여주듯 대규모 자가대전 인프라 문제다(3.4).
+- 화면 인식: OpenBW 렌더러로 "이미지 + 정답 유닛/건물 좌표"를 자동 생성할 수 있다는 주장은 SDL 뷰어 빌드가 가능하다는 점에서 성립한다. 단 SD 그래픽 기준이라 리마스터 HD와는 맞지 않는다. 이 트랙은 4.1의 결정(BWAPI만)과 충돌하지 않는다. "사람처럼 보고 조작하는 봇" 연구 트랙으로 분리해 두고, 배틀넷 공식 래더에서는 쓰지 않는다(약관 위반).
+
+### 9.5 구조가 바뀌는가
+
+바뀌지 않는다. v0.5의 핵심인 "LLM은 이벤트 기반 전략 판단, 결정적 코드가 실행, 스크립트 마이크로, 오프라인 코치 루프"는 그대로다. Brood War Bench는 이 분리가 없으면 프론티어 모델도 초보 수준에 머문다는 실증을 더했을 뿐이다.
+
+바뀌는 것은 플랫폼과 기준이다: 주 엔진 OpenBW와 검증용 Windows 레인, Phase 0~1의 산출물과 완료 기준, 브리지 방식(shim 모듈 필수), Option B 후보군, Command Queue의 인간 조건 프로파일(옵션).
 
 ---
 
@@ -465,6 +535,13 @@ BWAPI · 환경 · 라이브러리
 - 봇: Steamhammer http://satirist.org/ai/starcraft/steamhammer/ , McRave https://github.com/Cmccrave/McRave , UAlbertaBot https://github.com/davechurchill/ualbertabot , ZZZKBot https://github.com/chriscoxe/ZZZKBot
 - 라이브러리: BWEM https://bwem.sourceforge.net/ (커뮤니티 포크 https://github.com/N00byEdge/BWEM-community ), BWEB https://github.com/Cmccrave/BWEB , FAP https://github.com/N00byEdge/FAP , BOSS https://github.com/davechurchill/BOSS
 - BASIL 규칙: https://www.basil-ladder.net/rules.html , AIIDE 2025 CFP: https://sites.google.com/ualberta.ca/aiide2025/calls/call-for-starcraft-ai-competition
+
+Brood War Bench · OpenBW 추가 확인 (9장)
+- Brood War Bench 결과 페이지(이 환경에서 접근 불가): https://bw.swerdlow.dev/report , 사이트: https://bw.swerdlow.dev/ , Hacker News 스레드: https://news.ycombinator.com/item?id=49766966
+- 2차 보도: https://www.kucoin.com/news/flash/19-ai-models-compete-in-starcraft-brood-war-benchmark-released , https://eu.36kr.com/en/p/3995368325501056
+- rasdasd/starcraft-ai README(OpenBW 내장 AI 없음, 속도, shim 구조, scbw_bwapi440.zip): https://github.com/rasdasd/starcraft-ai
+- lukecameron/starcraft-ai(McRave·ZZZKBot·UAlbertaBot·Stardust의 OpenBW 포트): https://github.com/lukecameron/starcraft-ai
+- OpenBW 이슈 #15 "Is it possible to play against bots using the openbw engine?": https://github.com/OpenBW/openbw/issues/15
 
 Claude API (2026-09 기준)
 - 모델 개요: https://platform.claude.com/docs/en/about-claude/models/overview , 가격: https://platform.claude.com/docs/en/about-claude/pricing
