@@ -7,3 +7,4 @@ __pycache__/
 .pytest_cache/
 eval/results/
 build/
+!body/sidecar_client/third_party/

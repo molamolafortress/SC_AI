@@ -378,3 +378,26 @@ SC_AI/
 | Strategy 응답 지연(캐시 히트 시 예상 3~8초) | 미실측 | `usage`·지연 로그로 실측 후 트리거 조정 |
 | LLM 지식 오류 | 확실히 발생 | 빌드 DB·맵 지식을 프롬프트에, Validator, 코치 루프 |
 | 몸체의 배치·컨트롤 품질 한계 | 프로 미만 | 병목 아님. 코치 루프에서 발견 시 몸체 코드 수정 |
+
+---
+
+## 13. 구현 현황 (2026-09-29, 첫 구현 세션)
+
+| 항목 | 상태 | 위치 |
+|---|---|---|
+| Python 사이드카(서버, 상태 저장, 요약, 원장, 검증기, 전략 호출, LLM 백엔드 3종, 로거) | 구현, 테스트 5개 통과 (fake LLM 기준) | `bot/sidecar/` |
+| 실제 Anthropic 호출 경로 | 코드 작성됨, **미실행**(이 환경에 API 키 없음). 첫 실행 시 `usage`·지연을 로그로 확인할 것 | `bot/sidecar/llm.py` |
+| 지식 파일 | 규칙·ZvT 빌드 초안. 맵 지식은 플레이스홀더(좌표 없음) | `knowledge/` |
+| 평가 하네스 | mock 러너 + Wilson 구간 지표 + 비교 판정. OpenBW 러너는 게임당 스크립트만 | `eval/`, `tools/run_game_openbw.sh` |
+| OpenBW 헤드리스 빌드 | 이 컨테이너에서 성공(gcc 13 패치 1줄). MPQ 없어 게임 실행은 미검증 | `docs/setup_openbw.md`, `body/patches/openbw/` |
+| C++ 사이드카 클라이언트 + 상태 추적기 + 프로브 AI 모듈 | OpenBW BWAPI에 대해 컴파일 성공. 게임 내 동작은 MPQ 필요 | `body/sidecar_client/` |
+| McRave 훅 분석 | 완료. 훅 위치·스니펫·공수 추정(훅 38h + Linux 포트 8~16h) | `body/HOOKS.md` |
+| McRave 훅 구현, Linux 포트 | 미착수 | |
+
+McRave 분석에서 드러난 설계 보정:
+- McRave는 전략 상태를 전역으로 두고 **매 프레임 다시 계산**한다. 따라서 훅1은 "McRave가 계산한 뒤 Directive 값으로 덮어쓰기"가 최소 변경이다. 채팅 명령 `/bo`가 이미 런타임 빌드 전환을 하므로 안전하다.
+- McRave는 FAP가 아니라 자체 전투 시뮬(Horizon)을 쓴다. `combat_sim` 필드는 Horizon 수치로 채운다.
+- 명령 발행 지점이 단일하지 않다(약 25곳 우회). 훅3은 계측만 먼저 하고, 제한(APM 프로파일)은 나중에 `Cmd::` 심을 도입한다.
+- VS2017 전용 빌드라 Linux 포트가 선행 과제다. 그 전까지 OpenBW 레인은 프로브 모듈과 UAlbertaBot/ZZZKBot으로 파이프라인을 검증한다.
+
+다음 작업 순서: (1) MPQ·맵 확보 → 프로브 모듈로 OpenBW 1게임 + 사이드카 로그 확인 → (2) McRave Linux 포트 → (3) 훅1·2 → (4) Phase 2 하네스 루프.

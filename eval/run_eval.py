@@ -53,7 +53,8 @@ def main() -> None:
     out_dir = Path("eval/results") / run_id
     cfg = SidecarConfig.load(args.config, logs_dir=out_dir / "logs", mode="lockstep")
     if args.runner == "openbw":
-        raise SystemExit("openbw runner not implemented yet: see docs/setup_openbw.md and design_v0.5.md Phase 0/2")
+        raise SystemExit("openbw runner: start the sidecar (python -m bot.sidecar.server) and use tools/run_game_openbw.sh per game; "
+                         "the loop over games + result collection from the sidecar logs is Phase 2 work (needs MPQ data to test)")
     run_mock(cfg, args.games, args.seed, args.strategy)
     metrics = {"run_id": run_id, "args": vars(args), **summarize(collect(cfg.logs_dir))}
     (out_dir / "metrics.json").write_text(json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8")
