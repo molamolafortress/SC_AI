@@ -1,0 +1,228 @@
+diff --git a/Source/Horizon/Horizon.cpp b/Source/Horizon/Horizon.cpp
+index ad60eaa..24964ef 100644
+--- a/Source/Horizon/Horizon.cpp
++++ b/Source/Horizon/Horizon.cpp
+@@ -72,7 +72,7 @@ namespace McRave::Horizon {
+ 
+     void simulate(UnitInfo &unit)
+     {
+-        auto &unitTarget = unit.getTarget();
++        auto unitTarget = unit.getTarget();
+         if (!unitTarget)
+             return;
+ 
+diff --git a/Source/McRave/Info/Resource/Resources.cpp b/Source/McRave/Info/Resource/Resources.cpp
+index caf2e76..f98de39 100644
+--- a/Source/McRave/Info/Resource/Resources.cpp
++++ b/Source/McRave/Info/Resource/Resources.cpp
+@@ -335,7 +335,7 @@ namespace McRave::Resources {
+ 
+     void removeResource(Unit unit)
+     {
+-        auto &resource = getResourceInfo(unit);
++        auto resource = getResourceInfo(unit);
+ 
+         if (resource) {
+ 
+diff --git a/Source/McRave/Info/Unit/Targeting.cpp b/Source/McRave/Info/Unit/Targeting.cpp
+index dfc2337..e814c4f 100644
+--- a/Source/McRave/Info/Unit/Targeting.cpp
++++ b/Source/McRave/Info/Unit/Targeting.cpp
+@@ -315,7 +315,7 @@ namespace McRave::Targets {
+     Priority queenPriority(UnitInfo &unit, UnitInfo &target)
+     {
+         for (auto &t : target.getUnitsTargetingThis()) {
+-            if (auto &targeter = t.lock()) {
++            if (auto targeter = t.lock()) {
+                 if (targeter->getType() == Zerg_Queen)
+                     return Priority::Ignore;
+             }
+@@ -449,7 +449,7 @@ namespace McRave::Targets {
+     {
+         combatTargeters = 0;
+         for (auto &t : target.getUnitsTargetingThis()) {
+-            if (auto &targeter = t.lock()) {
++            if (auto targeter = t.lock()) {
+                 if (targeter->getRole() == Role::Combat)
+                     combatTargeters++;
+             }
+@@ -820,7 +820,7 @@ namespace McRave::Targets {
+ 
+             // Enemy units are assumed targets or order targets
+             if (unit.unit()->exists() && unit.unit()->getOrderTarget()) {
+-                auto &targetInfo = Units::getUnitInfo(unit.unit()->getOrderTarget());
++                auto targetInfo = Units::getUnitInfo(unit.unit()->getOrderTarget());
+                 if (targetInfo) {
+                     unit.setTarget(&*targetInfo);
+                     targetInfo->addTargeter(unit);
+@@ -836,8 +836,8 @@ namespace McRave::Targets {
+ 
+     void updateStatistics()
+     {
+-        auto &enemyStrength = Players::getStrength(PlayerState::Enemy);
+-        auto &myStrength    = Players::getStrength(PlayerState::Self);
++        auto enemyStrength = Players::getStrength(PlayerState::Enemy);
++        auto myStrength    = Players::getStrength(PlayerState::Self);
+ 
+         maxPriority = 1.0;
+         earliest    = 999999;
+diff --git a/Source/McRave/Info/Unit/UnitInfo.h b/Source/McRave/Info/Unit/UnitInfo.h
+index 1bd0b71..af011fa 100644
+--- a/Source/McRave/Info/Unit/UnitInfo.h
++++ b/Source/McRave/Info/Unit/UnitInfo.h
+@@ -234,8 +234,8 @@ namespace McRave {
+         void setGoalType(GoalType newGoalType) { gType = newGoalType; }
+ 
+         // Paths
+-        void setMarchPath(BWEB::Path &newPath) { marchPath = newPath; }
+-        void setRetreatPath(BWEB::Path &newPath) { retreatPath = newPath; }
++        void setMarchPath(BWEB::Path newPath) { marchPath = std::move(newPath); }
++        void setRetreatPath(BWEB::Path newPath) { retreatPath = std::move(newPath); }
+         BWEB::Path &getMarchPath() { return marchPath; }
+         BWEB::Path &getRetreatPath() { return retreatPath; }
+         bool hasSameMarchPath(Position source, Position target) { return marchPath.getSource() == TilePosition(source) && marchPath.getTarget() == TilePosition(target); }
+diff --git a/Source/McRave/Info/Unit/UnitMath.cpp b/Source/McRave/Info/Unit/UnitMath.cpp
+index 9c1cdac..5c19c99 100644
+--- a/Source/McRave/Info/Unit/UnitMath.cpp
++++ b/Source/McRave/Info/Unit/UnitMath.cpp
+@@ -32,7 +32,7 @@ namespace McRave::Math {
+             double cnt = 0.0;
+             for (auto &i : unit.unit()->getInterceptors()) {
+                 if (i && !i->exists()) {
+-                    auto &interceptor = Units::getUnitInfo(i);
++                    auto interceptor = Units::getUnitInfo(i);
+                     if (interceptor)
+                         cnt += interceptor->getMaxGroundStrength();
+                 }
+@@ -63,7 +63,7 @@ namespace McRave::Math {
+             double cnt = 0.0;
+             for (auto &i : unit.unit()->getInterceptors()) {
+                 if (i && !i->exists()) {
+-                    auto &interceptor = Units::getUnitInfo(i);
++                    auto interceptor = Units::getUnitInfo(i);
+                     if (interceptor)
+                         cnt += interceptor->getMaxAirStrength();
+                 }
+diff --git a/Source/McRave/Macro/Expanding/Expanding.cpp b/Source/McRave/Macro/Expanding/Expanding.cpp
+index 96946bc..aa8c0cc 100644
+--- a/Source/McRave/Macro/Expanding/Expanding.cpp
++++ b/Source/McRave/Macro/Expanding/Expanding.cpp
+@@ -23,7 +23,7 @@ namespace McRave::Expansion {
+             // Check if any base goes through enemy territory currently
+             dangerousStations.clear();
+             for (auto &station : BWEB::Stations::getStations()) {
+-                auto &path = Stations::getPathBetween(Terrain::getMyMain(), &station);
++                auto path = Stations::getPathBetween(Terrain::getMyMain(), &station);
+                 if (!path.getTiles().empty()) {
+                     auto danger = Util::findPointOnPath(path, [&](auto &p) { return Terrain::inTerritory(PlayerState::Enemy, p); });
+ 
+diff --git a/Source/McRave/Map/Stations/Stations.h b/Source/McRave/Map/Stations/Stations.h
+index 1d534e4..28ea276 100644
+--- a/Source/McRave/Map/Stations/Stations.h
++++ b/Source/McRave/Map/Stations/Stations.h
+@@ -55,7 +55,7 @@ namespace McRave::Stations {
+     template <typename F> //
+     const BWEB::Station *getClosestStationAir(BWAPI::Position here, PlayerState player, F &&pred)
+     {
+-        auto &list                          = getStations(player);
++        auto list                          = getStations(player);
+         auto distBest                       = DBL_MAX;
+         const BWEB::Station *closestStation = nullptr;
+         for (auto &station : list) {
+@@ -76,7 +76,7 @@ namespace McRave::Stations {
+     template <typename F> //
+     const BWEB::Station *getClosestStationGround(BWAPI::Position here, PlayerState player, F &&pred)
+     {
+-        auto &list                          = getStations(player);
++        auto list                          = getStations(player);
+         auto distBest                       = DBL_MAX;
+         const BWEB::Station *closestStation = nullptr;
+         for (auto &station : list) {
+diff --git a/Source/McRave/Micro/All/Commands.cpp b/Source/McRave/Micro/All/Commands.cpp
+index 120879c..e5e9b23 100644
+--- a/Source/McRave/Micro/All/Commands.cpp
++++ b/Source/McRave/Micro/All/Commands.cpp
+@@ -736,7 +736,7 @@ namespace McRave::Command {
+                 score = 1.0 * Util::fastReciprocal(grdDist);
+ 
+             for (auto &c : unit.getAssignedCargo()) {
+-                if (auto &cargo = c.lock()) {
++                if (auto cargo = c.lock()) {
+ 
+                     // If we're trying to load
+                     if (unit.getTransportState() == TransportState::Loading)
+diff --git a/Source/McRave/Micro/Transport/Transports.cpp b/Source/McRave/Micro/Transport/Transports.cpp
+index f8a0caa..e065543 100644
+--- a/Source/McRave/Micro/Transport/Transports.cpp
++++ b/Source/McRave/Micro/Transport/Transports.cpp
+@@ -72,7 +72,7 @@ namespace McRave::Transports {
+ 
+             // Calculate cargo size allocated (but not necessarily loaded)
+             for (auto &c : cargoList) {
+-                if (auto &cargo = c.lock())
++                if (auto cargo = c.lock())
+                     cargoSize += cargo->getType().spaceRequired();
+             }
+ 
+@@ -227,7 +227,7 @@ namespace McRave::Transports {
+             UnitInfo *closestCargo = nullptr;
+             auto distBest          = DBL_MAX;
+             for (auto &c : unit.getAssignedCargo()) {
+-                auto &cargo = c.lock();
++                auto cargo = c.lock();
+ 
+                 auto dist = cargo->getPosition().getDistance(unit.getPosition());
+                 if (dist < distBest && !cargo->unit()->isLoaded()) {
+@@ -239,7 +239,7 @@ namespace McRave::Transports {
+             // If list isn't empty, our destination is the first valid one
+             auto engageDestination = unit.getPosition();
+             for (auto &c : unit.getAssignedCargo()) {
+-                auto &cargo = c.lock();
++                auto cargo = c.lock();
+                 if (cargo->getDestination().isValid()) {
+                     engageDestination = cargo->getDestination();
+                     break;
+@@ -315,7 +315,7 @@ namespace McRave::Transports {
+         // If unit has a transport, remove it from the transports cargo, then set transport to nullptr
+         if (unit.hasTransport()) {
+             auto &cargoList = unit.getTransport().lock()->getAssignedCargo();
+-            for (auto &cargo = cargoList.begin(); cargo != cargoList.end(); cargo++) {
++            for (auto cargo = cargoList.begin(); cargo != cargoList.end(); cargo++) {
+                 if (cargo->lock() && cargo->lock() == unit.shared_from_this()) {
+                     cargoList.erase(cargo);
+                     break;
+@@ -326,7 +326,7 @@ namespace McRave::Transports {
+ 
+         // If unit is a transport, set the transport of all cargo to nullptr
+         for (auto &c : unit.getAssignedCargo()) {
+-            if (auto &cargo = c.lock())
++            if (auto cargo = c.lock())
+                 cargo->setTransport(nullptr);
+         }
+     }
+diff --git a/Source/McRave/Micro/Worker/Workers.cpp b/Source/McRave/Micro/Worker/Workers.cpp
+index cd90ab6..ecb8b76 100644
+--- a/Source/McRave/Micro/Worker/Workers.cpp
++++ b/Source/McRave/Micro/Worker/Workers.cpp
+@@ -124,7 +124,7 @@ namespace McRave::Workers {
+                         safeStations.push_back(station);
+ 
+                     else if (canTransferWorkers()) {
+-                        auto &path     = Stations::getPathBetween(closestStation, station);
++                        auto path     = Stations::getPathBetween(closestStation, station);
+                         auto threatPos = Util::findPointOnPath(path, [&](auto &t) { return Grids::getGroundThreat(t, PlayerState::Enemy) > 0.0; });
+                         if (!threatPos)
+                             safeStations.push_back(station);
+diff --git a/Source/McRave/Strategy/Goals/Goals.cpp b/Source/McRave/Strategy/Goals/Goals.cpp
+index c28bcae..ec30686 100644
+--- a/Source/McRave/Strategy/Goals/Goals.cpp
++++ b/Source/McRave/Strategy/Goals/Goals.cpp
+@@ -585,7 +585,7 @@ namespace McRave::Goals {
+             //}
+ 
+             // Before we have a spore, we need to defend overlords
+-            auto &stations    = Stations::getStations(PlayerState::Self);
++            auto stations    = Stations::getStations(PlayerState::Self);
+             auto mainStations = int(count_if(stations.begin(), stations.end(), [&](auto &s) { return s->isMain(); }));
+ 
+             // Before Hydras have upgrades, defend vulnerable bases, put lings on defense too

@@ -392,7 +392,8 @@ SC_AI/
 | OpenBW 헤드리스 빌드 | 이 컨테이너에서 성공(gcc 13 패치 1줄). MPQ 없어 게임 실행은 미검증 | `docs/setup_openbw.md`, `body/patches/openbw/` |
 | C++ 사이드카 클라이언트 + 상태 추적기 + 프로브 AI 모듈 | OpenBW BWAPI에 대해 컴파일 성공. 게임 내 동작은 MPQ 필요 | `body/sidecar_client/` |
 | McRave 훅 분석 | 완료. 훅 위치·스니펫·공수 추정(훅 38h + Linux 포트 8~16h) | `body/HOOKS.md` |
-| McRave 훅 구현, Linux 포트 | 미착수 | |
+| McRave Linux 포트 | 완료(2026-09-30). OpenBW BWAPI 헤더로 114 TU 빌드, `McRave.so` dlopen·심볼 확인. 패치 5개(39파일), 게임 내 실행은 MPQ 대기 | `body/mcrave_port/`, `body/patches/mcrave/` |
+| McRave 훅 1~3 구현 | 미착수 | |
 
 McRave 분석에서 드러난 설계 보정:
 - McRave는 전략 상태를 전역으로 두고 **매 프레임 다시 계산**한다. 따라서 훅1은 "McRave가 계산한 뒤 Directive 값으로 덮어쓰기"가 최소 변경이다. 채팅 명령 `/bo`가 이미 런타임 빌드 전환을 하므로 안전하다.
