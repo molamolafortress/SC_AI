@@ -102,7 +102,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--games", type=int, default=30)
     ap.add_argument("--opponent", default="probe")
-    ap.add_argument("--map", default="maps/BroodWar/sscai/(2)Benzene.scx")
+    ap.add_argument("--map", default="maps/BroodWar/sscai/(4)FightingSpirit.scx")
     ap.add_argument("--strategy", default="fixed", choices=["fixed", "random", "llm"])
     ap.add_argument("--runner", default="mock", choices=["mock", "openbw"])
     ap.add_argument("--seed", type=int, default=1)

@@ -54,7 +54,8 @@ def load_map_knowledge(knowledge_dir: Path, map_name: str) -> dict:
     wanted = _slug(map_name)
     for path in maps_dir.glob("*.json"):
         data = json.loads(path.read_text(encoding="utf-8"))
-        if _slug(data.get("map", path.stem)) == wanted or path.stem == wanted:
+        known = _slug(data.get("map", path.stem))
+        if known == wanted or path.stem == wanted or (known and wanted.startswith(known)):
             return data
     return {}
 
