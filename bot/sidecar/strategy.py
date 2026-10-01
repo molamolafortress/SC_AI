@@ -1,6 +1,7 @@
 """StrategyCaller: turns triggers into validated directives, one LLM call in flight at a time."""
 from __future__ import annotations
 
+import hashlib
 import itertools
 import threading
 from dataclasses import dataclass, field
@@ -34,6 +35,9 @@ class StrategyCaller:
 
     def __post_init__(self) -> None:
         self._prefix = fixed_prefix(self.knowledge)
+        # The cached system prompt is identical for every call of the game: log it once, in full, with its hash.
+        self.logger.log("prefix", 0, sha256=hashlib.sha256(self._prefix.encode("utf-8")).hexdigest(), text=self._prefix,
+                        model=self.cfg.models.strategy_model, backend=type(self.backend).__name__)
 
     # ---- called on every state post -------------------------------------------------
     def on_state(self) -> None:
@@ -70,8 +74,9 @@ class StrategyCaller:
             return
         self.logger.add_cost(result.cost_usd)
         self.logger.log("strategy", snapshot.frame, trigger=trigger, effort=effort, input=msg,
-                        output=result.directive.model_dump(), latency_ms=round(result.latency_ms, 1),
-                        usage=result.usage, cost_usd=round(result.cost_usd, 5))
+                        output=result.directive.model_dump(), raw_text=result.raw_text,
+                        latency_ms=round(result.latency_ms, 1), usage=result.usage, cost_usd=round(result.cost_usd, 5),
+                        game_time=snapshot.game_time)
         if self.logger.total_cost_usd >= self.cfg.budgets.per_game_usd:
             self.budget_exhausted = True
             self.logger.log("strategy", snapshot.frame, outcome="budget_exhausted", total_cost_usd=self.logger.total_cost_usd)
