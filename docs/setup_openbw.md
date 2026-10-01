@@ -208,3 +208,12 @@ BWAPI_CONFIG_AUTO_MENU__AUTO_RESTART=OFF ../../third_party/openbw-bwapi/build/bi
 - Build tree: `third_party/openbw-bwapi/build` (`bin/BWAPILauncher`, `lib/*.so`)
 - Patch: `body/patches/openbw/0001-bwapi-game-h-include-cstdint.patch`
 - Container recipe: `docker/Dockerfile.openbw` (not yet built here: the docker daemon is not reachable in this container)
+
+
+## 7. 검증 기록 (2026-10-01, 실제 게임 데이터로)
+
+- 게임 데이터: `scbw_bwapi440.zip`을 `third_party/game-data/`에 풀었다. zip 안의 파일명은 `STARDAT.MPQ`, `BROODAT.MPQ`, `patch_rt.mpq`이고 OpenBW는 `StarDat.mpq`, `BrooDat.mpq`, `Patch_rt.mpq`를 찾으므로 **심볼릭 링크 3개**를 만든다 (`ln -s STARDAT.MPQ StarDat.mpq` 등). 맵은 `maps/BroodWar/{sscai,aiide,cog,iccup}/`에 84개.
+- `Game::getRandomSeed()`는 이 포크에서 `ReplayHead_gameSeed_randSeed` 예외를 던진다. 봇 코드에서 호출하지 말 것.
+- 단일 프로세스 싱글플레이(`AUTO_MENU=SINGLE_PLAYER`)는 상대가 가만히 있으므로 McRave가 4:47에 이긴다. 파이프라인 확인용.
+- 2프로세스 LAN(`OPENBW_LAN_MODE=LOCAL` + 소켓 경로)은 `tools/run_game_openbw.sh`로 검증했다. 플레이어마다 작업 디렉터리(`p1/`, `p2/`)에 `bwapi-data/write`, `bwapi-data/read`, `maps` 링크가 있어야 한다. 상대 프로세스에는 `SIDECAR_*` 변수를 넘기지 않는다(넘기면 상대 게임도 사이드카에 집계된다).
+- 속도: 속도 0에서 약 5게임분(6,700프레임)이 20초 안팎. `python -m eval.run_eval --runner openbw --games 2 --parallel 2`가 43초.

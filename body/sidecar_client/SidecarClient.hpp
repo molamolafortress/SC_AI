@@ -20,6 +20,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <unistd.h>
 
 #define CPPHTTPLIB_NO_EXCEPTIONS
 #include "third_party/httplib.h"
@@ -165,7 +166,7 @@ private:
         std::strftime(buf, sizeof buf, "%Y%m%dT%H%M%S", std::localtime(&now));
         std::string map = BWAPI::Broodwar->mapFileName();
         for (auto& c : map) if (!isalnum(static_cast<unsigned char>(c))) c = '_';
-        return std::string(buf) + "_" + map + "_" + std::to_string(BWAPI::Broodwar->getRandomSeed());
+        return std::string(buf) + "_" + map + "_" + std::to_string(static_cast<long>(::getpid()));
     }
 
     std::string host_;

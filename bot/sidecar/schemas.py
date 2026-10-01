@@ -73,6 +73,7 @@ class StateSummary(BaseModel):
     events: list[GameEvent] = Field(default_factory=list)
     execution: ExecutionFeedback = Field(default_factory=ExecutionFeedback)
     body_defaults: dict[str, str] = Field(default_factory=dict)
+    metrics: dict[str, float] = Field(default_factory=dict)
 
 
 class ArmyObjective(BaseModel):

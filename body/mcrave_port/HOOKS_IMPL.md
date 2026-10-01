@@ -150,3 +150,10 @@ before the first minute), `apm_game`. Nothing is throttled.
    no stalls (frame time unchanged), and the game to finish normally.
 5. Only then run `python -m eval.run_eval ... --runner openbw` and `eval.compare` per CLAUDE.md
    before adopting any change to the opening table or the apply rules.
+
+
+## Playtest notes (2026-10-01)
+
+- Verified in real OpenBW games (single player and 2-process LAN): state posts every 24 frames, directive drawn/logged, `/game/end` received, replay saved.
+- `applyOpening()` now applies **once per directive id**. Per-frame application fought McRave's scouting reaction (2Rax -> PoolHatch/Overpool) every frame (2,059 log lines in one game). The body stays reactive; the next directive re-decides.
+- `Game::getRandomSeed()` throws on the OpenBW fork; the client uses the pid for the game id instead.

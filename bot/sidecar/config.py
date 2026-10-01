@@ -62,6 +62,8 @@ class SidecarConfig:
                     cfg.models = ModelConfig(**value)
                 elif hasattr(cfg, key):
                     setattr(cfg, key, Path(value) if key.endswith("_dir") else value)
+        if os.environ.get("SIDECAR_LOGS_DIR"):
+            cfg.logs_dir = Path(os.environ["SIDECAR_LOGS_DIR"])
         for key, value in overrides.items():
             setattr(cfg, key, value)
         return cfg

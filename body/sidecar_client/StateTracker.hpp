@@ -86,7 +86,7 @@ public:
         for (auto up : BWAPI::UpgradeTypes::allUpgradeTypes())
             if (up.getRace() == BWAPI::Races::Zerg && me->getUpgradeLevel(up) > 0) tech[norm(up.getName())] = "done";
         for (auto tt : BWAPI::TechTypes::allTechTypes())
-            if (tt.getRace() == BWAPI::Races::Zerg && me->hasResearched(tt)) tech[norm(tt.getName())] = "done";
+            if (tt.getRace() == BWAPI::Races::Zerg && tt.mineralPrice() > 0 && me->hasResearched(tt)) tech[norm(tt.getName())] = "done";
         for (auto u : me->getUnits()) {
             if (u->isUpgrading()) tech[norm(u->getUpgrade().getName())] = "researching";
             if (u->isResearching()) tech[norm(u->getTech().getName())] = "researching";
@@ -106,7 +106,7 @@ public:
         const std::string matchup = std::string("Zv") + (enemyRace_.empty() ? "X" : std::string(1, static_cast<char>(toupper(enemyRace_[0]))));
 
         return {
-            {"game_id", gameId}, {"frame", frame}, {"game_time", gt}, {"matchup", matchup}, {"map", bw->mapName()},
+            {"game_id", gameId}, {"frame", frame}, {"game_time", gt}, {"matchup", matchup}, {"map", cleanName(bw->mapName())},
             {"me", {{"minerals", me->minerals()}, {"gas", me->gas()}, {"supply", {me->supplyUsed() / 2, me->supplyTotal() / 2}},
                     {"larva", larva}, {"units", myUnits}, {"buildings", myBuildings}, {"tech", tech}, {"army_value", armyValue},
                     {"army_pos", armyN ? nlohmann::json({ax / armyN, ay / armyN}) : nlohmann::json(nullptr)}}},
@@ -124,6 +124,11 @@ public:
 private:
     struct Event { std::string type, what; int frame; };
 
+    static std::string cleanName(const std::string& s) {
+        std::string out;
+        for (unsigned char c : s) if (c >= 0x20) out += static_cast<char>(c);
+        return out;
+    }
     static std::string norm(std::string s) {
         // "Terran_Barracks" -> "barracks", "Zerg_Spawning_Pool" -> "spawning_pool", "Metabolic Boost" -> "metabolic_boost"
         auto us = s.find('_');

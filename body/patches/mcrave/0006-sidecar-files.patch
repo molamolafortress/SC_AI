@@ -1,9 +1,9 @@
 diff --git a/Source/McRave/Main/Sidecar.cpp b/Source/McRave/Main/Sidecar.cpp
 new file mode 100644
-index 0000000..729d93c
+index 0000000..038e852
 --- /dev/null
 +++ b/Source/McRave/Main/Sidecar.cpp
-@@ -0,0 +1,585 @@
+@@ -0,0 +1,591 @@
 +// Sidecar: SC_AI hooks 1-3 for McRave. See Sidecar.h and body/mcrave_port/HOOKS_IMPL.md.
 +//
 +// The heavy headers (cpp-httplib, nlohmann/json) are confined to this translation unit. They are included before
@@ -398,6 +398,12 @@ index 0000000..729d93c
 +            warnOnce("opening '" + d->opening + "' has no allowed McRave build for this matchup, keeping " + currentBuild + "/" + currentOpener + "/" + currentTransition);
 +            return;
 +        }
++        // Apply once per directive: the LLM sets the opening when it decides; McRave's own scouting reactions may
++        // change it afterwards (the body stays reactive), and the next directive (triggered by the same event) re-decides.
++        static string lastAppliedId;
++        if (d->directive_id == lastAppliedId)
++            return;
++        lastAppliedId = d->directive_id;
 +        auto buildChange = (build != currentBuild || opener != currentOpener);
 +        // Build/opener may only change before the transition started; a transition-only change is fine while the book is active.
 +        if (buildChange && inTransition)

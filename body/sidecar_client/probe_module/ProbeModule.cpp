@@ -11,10 +11,12 @@ public:
     void onStart() override {
         const char* host = std::getenv("SIDECAR_HOST");
         const char* port = std::getenv("SIDECAR_PORT");
+        if (!host && !port) { BWAPI::Broodwar->sendText("SidecarProbe: no SIDECAR_HOST/PORT, idle opponent mode"); return; }
         client_ = std::make_unique<SidecarClient>(host ? host : "127.0.0.1", port ? std::atoi(port) : 8770);
         BWAPI::Broodwar->sendText("SidecarProbe game %s", client_->gameId().c_str());
     }
     void onFrame() override {
+        if (!client_) return;
         tracker_.update();
         client_->onFrame(tracker_);
         if (BWAPI::Broodwar->getFrameCount() % 240 == 0) {
