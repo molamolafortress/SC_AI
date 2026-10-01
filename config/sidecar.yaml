@@ -12,6 +12,7 @@ triggers:
   idle_minerals_seconds: 10
   big_engagement_loss_value: 200
   min_hold_seconds: 20
+  min_call_gap_seconds: 20
   decide_at_start: false        # true: call the LLM at frame 0 (old behaviour); false: body defaults until first scouting info or 2:00
   first_call_deadline_seconds: 120
   series_interval_seconds: 30

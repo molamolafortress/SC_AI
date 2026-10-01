@@ -62,7 +62,8 @@ class EnemyState(BaseModel):
     units_seen: dict[str, SeenUnit] = Field(default_factory=dict)
     buildings_seen: dict[str, SeenBuilding] = Field(default_factory=dict)
     expansions: int = 0
-    army_value_seen: int = 0
+    army_value_seen: int = 0       # seen within the last 25 s
+    army_value_max_seen: int = 0   # all-time max counts (cumulative picture)
     army_pos_seen: tuple[int, int] | None = None
     suspected_cloaked: list[dict] = Field(default_factory=list)
     army_region_seen: str = ""

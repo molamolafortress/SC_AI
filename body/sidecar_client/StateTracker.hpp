@@ -127,8 +127,13 @@ public:
         nlohmann::json enemyUnits = nlohmann::json::object(), enemyBuildings = nlohmann::json::object();
         for (auto& [n, s] : units_) enemyUnits[n] = {{"count", s.count}, {"last_frame", s.lastFrame}};
         for (auto& [n, s] : buildings_) if (s.count > 0) enemyBuildings[n] = {{"count", s.count}, {"first_frame", s.firstFrame}};
-        int enemyArmy = 0;
-        for (auto& [n, s] : units_) enemyArmy += s.count * priceOf(n);
+        // army_value_seen = value of enemy units seen in the last 25 s (current picture); army_value_max_seen = all-time max counts.
+        int enemyArmy = 0, enemyArmyMax = 0;
+        for (auto& [n, s] : units_) {
+            const int v = s.count * priceOf(n);
+            enemyArmyMax += v;
+            if (frame - s.lastFrame <= 600) enemyArmy += v;
+        }
 
         nlohmann::json events = nlohmann::json::array();
         for (auto& e : events_) {
@@ -148,7 +153,7 @@ public:
         meJ["army_region"] = (armyN && regionNamer) ? regionNamer(BWAPI::Position(int(ax / armyN), int(ay / armyN))) : std::string();   // "" = no army
         for (auto& [k, v] : meExtra.items()) meJ[k] = v;
         nlohmann::json enemyJ = {{"race", enemyRace_.empty() ? "unknown" : enemyRace_}, {"units_seen", enemyUnits},
-                                 {"buildings_seen", enemyBuildings}, {"expansions", expansions()}, {"army_value_seen", enemyArmy},
+                                 {"buildings_seen", enemyBuildings}, {"expansions", expansions()}, {"army_value_seen", enemyArmy}, {"army_value_max_seen", enemyArmyMax},
                                  {"army_pos_seen", nullptr}, {"suspected_cloaked", cloaked_}};
         enemyJ["army_region_seen"] = (enemyArmyFrame_ >= 0 && regionNamer) ? regionNamer(enemyArmyPos_) : std::string();   // "" = never seen
         enemyJ["army_last_seen_time"] = enemyArmyFrame_ >= 0 ? gameTime(enemyArmyFrame_) : std::string();

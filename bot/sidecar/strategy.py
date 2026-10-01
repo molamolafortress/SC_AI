@@ -53,6 +53,12 @@ class StrategyCaller:
             return
         if not self.store.is_transition_trigger(trigger) and not self.ledger.can_change(self.store.latest.frame):
             return
+        # Debounce: a burst of intel/building events within min_call_gap_seconds is answered by one call (events stay
+        # pending and ride along in the delta); only critical triggers bypass the gap.
+        gap = self.cfg.frames(self.cfg.triggers.min_call_gap_seconds)
+        if (not trigger.startswith(tuple(self.cfg.triggers.critical_triggers))
+                and self.store.latest.frame - self.store.last_call_frame < gap):
+            return
         effort = (self.cfg.models.strategy_effort_transition if self.store.is_transition_trigger(trigger)
                   else self.cfg.models.strategy_effort_regular)
         msg = user_message(self.store, self.ledger, trigger, self.knowledge)

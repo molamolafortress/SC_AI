@@ -42,6 +42,8 @@ def run_mock(cfg: SidecarConfig, games: int, seed: int, strategy: str) -> None:
 OPPONENTS = {  # name -> (module .so, race). Extend as more bots are ported to OpenBW.
     "probe": ("body/sidecar_client/probe_module/build/SidecarProbeModule.so", "Terran"),  # idle; pipeline check only
     "mcrave": ("build/mcrave/McRave.so", "Zerg"),  # pristine McRave as opponent = our own baseline body
+    "mcrave_terran": ("build/mcrave/McRave.so", "Terran"),    # McRave plays all races: ZvT test bed
+    "mcrave_protoss": ("build/mcrave/McRave.so", "Protoss"),  # ZvP test bed
     "zzzkbot": ("build/zzzkbot/ZZZKBot.so", "Zerg"),  # 4-pool/speedling rush bot (body/zzzkbot_port)
     "ualbertabot": ("build/ualbertabot/UAlbertaBot.so", "Protoss"),  # any race; strategy picked by race from its config (body/ualbertabot_port)
 }

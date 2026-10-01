@@ -22,6 +22,8 @@ class Triggers:
     idle_minerals_seconds: int = 10
     big_engagement_loss_value: int = 200
     min_hold_seconds: int = 20
+    min_call_gap_seconds: int = 20      # debounce: non-critical triggers wait this long after the previous call
+    critical_triggers: tuple = ("engagement_end", "cloaked", "game_start")
     # Start rule (audit item D): at game_start the body keeps its own defaults (observe-only directive) and the
     # first real LLM call happens at the first intel/enemy trigger, or at first_call_deadline_seconds if nothing
     # was scouted by then. decide_at_start: true restores the old behaviour (LLM call at frame 0).
