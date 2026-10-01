@@ -3,6 +3,8 @@
 python -m tools.show_game logs/games/<game>.jsonl            # timeline
 python -m tools.show_game <log> --call 3                      # full input + output of call 3
 python -m tools.show_game <log> --prefix                      # the cached system prompt used in this game
+python -m tools.show_game <log> --series                      # the time-series table (last call's view)
+python -m tools.show_game <log> --feedback                    # execution feedback section of every call
 """
 from __future__ import annotations
 
@@ -10,13 +12,34 @@ import argparse
 import json
 
 
+def section(text: str, heading: str) -> str:
+    """The body of one '## ...' section of an LLM input (up to the next heading)."""
+    i = text.find(heading)
+    if i < 0:
+        return ""
+    body = text[i:].split("\n", 1)[1] if "\n" in text[i:] else ""
+    j = body.find("\n## ")
+    return body if j < 0 else body[:j]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("log")
     ap.add_argument("--call", type=int, default=None)
     ap.add_argument("--prefix", action="store_true")
+    ap.add_argument("--series", action="store_true", help="print the time-series table of the game (from the last call's input)")
+    ap.add_argument("--feedback", action="store_true", help="print the execution feedback section per call")
     args = ap.parse_args()
     recs = [json.loads(l) for l in open(args.log, encoding="utf-8")]
+    if args.series or args.feedback:
+        calls = [r for r in recs if r["layer"] == "strategy" and r.get("input")]
+        if args.series and calls:
+            print(section(calls[-1]["input"], "## 시계열"))
+        if args.feedback:
+            for n, r in enumerate(calls, 1):
+                print(f"# call {n}  frame {r['frame']}  {r.get('game_time', '')}  trigger {r.get('trigger')}")
+                print(section(r["input"], "## 직전 지시 실행 결과") + "\n")
+        return
     if args.prefix:
         for r in recs:
             if r["layer"] == "prefix":

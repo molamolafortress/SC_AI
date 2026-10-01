@@ -31,9 +31,10 @@ def run_mock(cfg: SidecarConfig, games: int, seed: int, strategy: str) -> None:
     rng = random.Random(seed)
     for i in range(games):
         game_id = f"mock_{seed}_{i:03d}"
-        frame = 0
+        frame, last = 0, None
         for frame in range(0, int(rng.uniform(6, 12) * 60 * 23.81), 24):
-            client.post("/state", json=state(frame, game_id))
+            d = client.post("/state", json=state(frame, game_id, last)).json()["directive"]
+            last = d["directive_id"] if d else last
         result = "win" if rng.random() < 0.55 else "loss"
         client.post("/game/end", params={"game_id": game_id}, json={"result": result, "frame": frame})
 
@@ -108,8 +109,12 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--config", default="config/sidecar.yaml")
     ap.add_argument("--parallel", type=int, default=1)
-    ap.add_argument("--alternate-sides", action="store_true", help="odd games: our bot is player 2 (removes host/start-position bias)")
-    ap.add_argument("--lockstep", action="store_true", help="game waits for each LLM call (decision lands on the frame it was asked for)")
+    ap.add_argument("--alternate-sides", dest="alternate_sides", action="store_true", default=True,
+                    help="odd games: our bot is player 2 (removes host/start-position bias); default on")
+    ap.add_argument("--no-alternate-sides", dest="alternate_sides", action="store_false")
+    ap.add_argument("--lockstep", dest="lockstep", action="store_true", default=True,
+                    help="game waits for each LLM call (decision lands on the frame it was asked for); default on")
+    ap.add_argument("--no-lockstep", dest="lockstep", action="store_false")
     ap.add_argument("--max-frames", type=int, default=43200, help="frame cap per game (30 game-minutes); leaving counts as timeout")
     ap.add_argument("--llm", default=None, choices=["anthropic", "claude-cli", "fake", "recorded"], help="backend for --strategy llm")
     ap.add_argument("--our-module", default="build/mcrave/McRave.so")
@@ -117,12 +122,21 @@ def main() -> None:
 
     run_id = f"{time.strftime('%Y%m%d_%H%M%S')}_{args.runner}_{args.opponent}_{args.strategy}_s{args.seed}"
     out_dir = Path("eval/results") / run_id
-    cfg = SidecarConfig.load(args.config, logs_dir=out_dir / "logs", mode="lockstep")
+    cfg = SidecarConfig.load(args.config, logs_dir=out_dir / "logs", mode="lockstep" if args.lockstep else "headless")
     if args.runner == "openbw":
         run_openbw(cfg, args, out_dir)
     else:
         run_mock(cfg, args.games, args.seed, args.strategy)
-    metrics = {"run_id": run_id, "args": vars(args), **summarize(collect(cfg.logs_dir))}
+    if args.strategy == "llm":
+        backend = args.llm or cfg.llm_backend
+        if backend == "fake" and args.runner == "openbw":
+            backend = "claude-cli"
+    else:
+        backend = "observe" if args.runner == "openbw" else "fake"
+    metrics = {"run_id": run_id, "args": vars(args), "mode": cfg.mode, "lockstep": args.lockstep,
+               "alternate_sides": args.alternate_sides, "safety_interval_seconds": cfg.triggers.safety_interval_seconds,
+               "decide_at_start": cfg.triggers.decide_at_start, "strategy": args.strategy, "strategy_backend": backend,
+               "opponent": args.opponent, "map": args.map, "seed": args.seed, **summarize(collect(cfg.logs_dir))}
     (out_dir / "metrics.json").write_text(json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps(metrics, indent=2, ensure_ascii=False))
 

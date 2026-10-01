@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One headless 1v1 on OpenBW (verified 2026-10-01): our AI module vs an opponent AI module.
 # Usage: tools/run_game_openbw.sh <our.so> <opponent.so> <map rel. to game-data> [our_race] [enemy_race] [run_dir] [game_tag]
-# Env: GAME_DATA (dir with StarDat.mpq BrooDat.mpq Patch_rt.mpq + maps/), LAUNCHER, SIDECAR_HOST/PORT (passed to player 1 only),
+# Env: GAME_DATA (dir with StarDat.mpq BrooDat.mpq Patch_rt.mpq + maps/), LAUNCHER, SIDECAR_HOST/PORT, SC_AI_* (passed to our side only),
 #      OPENBW_GAME_SPEED (default 0 = max), TIMEOUT (default 900 s),
 #      OPP_DATA_DIR (optional: a directory whose contents are copied into p2/bwapi-data/ before launch,
 #      e.g. body/ualbertabot_port/bwapi-data with AI/UAlbertaBot_Config.txt; bots read it relative to their cwd).
@@ -20,8 +20,10 @@ common=(OPENBW_ENABLE_UI=0 "OPENBW_GAME_SPEED=${OPENBW_GAME_SPEED:-0}" "OPENBW_M
 # OUR_SIDE=p1|p2 (default p1): which process (first to bind = host) gets our module, the sidecar env and the frame cap.
 OUR_SIDE=${OUR_SIDE:-p1}
 if [ "$OUR_SIDE" = p1 ]; then A_SO=$OUR; A_RACE=$RACE; A_NAME=SC_AI; B_SO=$OPP; B_RACE=$ERACE; B_NAME=Opponent; else A_SO=$OPP; A_RACE=$ERACE; A_NAME=Opponent; B_SO=$OUR; B_RACE=$RACE; B_NAME=SC_AI; fi
-ours=(${SIDECAR_HOST:+SIDECAR_HOST=$SIDECAR_HOST} ${SIDECAR_PORT:+SIDECAR_PORT=$SIDECAR_PORT} ${SC_AI_MAX_FRAMES:+SC_AI_MAX_FRAMES=$SC_AI_MAX_FRAMES} ${SC_AI_LOCKSTEP:+SC_AI_LOCKSTEP=$SC_AI_LOCKSTEP})
-theirs=(-u SIDECAR_HOST -u SIDECAR_PORT -u SC_AI_MAX_FRAMES -u SC_AI_LOCKSTEP)
+# SC_AI_DUMP_STATE=<file>: our body appends every posted StateSummary (JSONL); SC_AI_MAP_DUMP=<file>: map knowledge dump at frame 0, then leave.
+ours=(${SIDECAR_HOST:+SIDECAR_HOST=$SIDECAR_HOST} ${SIDECAR_PORT:+SIDECAR_PORT=$SIDECAR_PORT} ${SC_AI_MAX_FRAMES:+SC_AI_MAX_FRAMES=$SC_AI_MAX_FRAMES} ${SC_AI_LOCKSTEP:+SC_AI_LOCKSTEP=$SC_AI_LOCKSTEP}
+      ${SC_AI_DUMP_STATE:+SC_AI_DUMP_STATE=$SC_AI_DUMP_STATE} ${SC_AI_MAP_DUMP:+SC_AI_MAP_DUMP=$SC_AI_MAP_DUMP})
+theirs=(-u SIDECAR_HOST -u SIDECAR_PORT -u SC_AI_MAX_FRAMES -u SC_AI_LOCKSTEP -u SC_AI_DUMP_STATE -u SC_AI_MAP_DUMP)
 [ "$OUR_SIDE" = p1 ] && { A_ENV=("${ours[@]}"); B_ENV=("${theirs[@]}"); } || { A_ENV=("${theirs[@]}"); B_ENV=("${ours[@]}"); }
 OPP_DIR=$([ "$OUR_SIDE" = p1 ] && echo p2 || echo p1)
 if [ -n "${OPP_DATA_DIR:-}" ]; then [ -d "$OPP_DATA_DIR" ] || { echo "OPP_DATA_DIR=$OPP_DATA_DIR is not a directory"; exit 2; }; cp -r "$OPP_DATA_DIR"/. "$RUN/$OPP_DIR/bwapi-data/"; fi

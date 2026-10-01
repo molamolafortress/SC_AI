@@ -19,6 +19,29 @@ class SeenBuilding(BaseModel):
     first_frame: int = 0
 
 
+class Region(BaseModel):
+    """Named region (body-side BWEM/McRave station). Names: main, natural, third, fourth, enemy_main,
+    enemy_natural, enemy_third, center, path_mid."""
+
+    tile: tuple[int, int] | None = None
+    owner: Literal["me", "enemy", "none"] = "none"
+
+
+class MyBase(BaseModel):
+    name: str = "main"
+    workers_minerals: int = 0
+    workers_gas: int = 0
+    mineral_patches: int = 0
+    gas_geysers: int = 0
+    saturation: float = 0.0     # workers / (patches*2 + geysers*3)
+    hatcheries: int = 0
+
+
+class Production(BaseModel):
+    in_progress: dict[str, int] = Field(default_factory=dict)
+    larva: int = 0
+
+
 class MyState(BaseModel):
     minerals: int = 0
     gas: int = 0
@@ -29,6 +52,9 @@ class MyState(BaseModel):
     tech: dict[str, str] = Field(default_factory=dict)
     army_value: int = 0
     army_pos: tuple[int, int] | None = None
+    bases: list[MyBase] = Field(default_factory=list)
+    army_region: str = ""
+    production: Production = Field(default_factory=Production)
 
 
 class EnemyState(BaseModel):
@@ -39,6 +65,23 @@ class EnemyState(BaseModel):
     army_value_seen: int = 0
     army_pos_seen: tuple[int, int] | None = None
     suspected_cloaked: list[dict] = Field(default_factory=list)
+    army_region_seen: str = ""
+    army_last_seen_time: str = ""
+
+
+class IntelBuildingPos(BaseModel):
+    region: str = ""
+    tile: tuple[int, int] | None = None
+    progress: float = 0.0       # 0..1 (1.0 = complete)
+    completes_time: str = "?"
+    last_seen_time: str = "?"
+
+
+class IntelEnemyBase(BaseModel):
+    region: str = ""
+    workers_seen_max: int = 0
+    last_seen_time: str = "?"
+    hatcheries: int = 0
 
 
 class IntelBuilding(BaseModel):
@@ -48,6 +91,7 @@ class IntelBuilding(BaseModel):
     started_time: str = "?"
     completes_frame: int = -1
     completes_time: str = "?"
+    positions: list[IntelBuildingPos] = Field(default_factory=list)
 
 
 class IntelGas(BaseModel):
@@ -92,6 +136,7 @@ class Intel(BaseModel):
     expansions: int = 0
     scout: IntelScout = Field(default_factory=IntelScout)
     army: IntelArmy = Field(default_factory=IntelArmy)
+    enemy_bases: list[IntelEnemyBase] = Field(default_factory=list)
 
     @property
     def empty(self) -> bool:
@@ -111,8 +156,28 @@ class GoalStatus(BaseModel):
     frame: int = 0
 
 
+class OverrideRecord(BaseModel):
+    """One directive field the body hooks applied (or ignored) to McRave, with before/after values."""
+
+    field: str
+    applied: bool = True
+    before: str | int | float | bool | dict | list | None = None
+    after: str | int | float | bool | dict | list | None = None
+    note: str = ""
+
+
+class ExecutionResults(BaseModel):
+    sunken: int = 0
+    spore: int = 0
+    army_actual: dict[str, int] = Field(default_factory=dict)
+    drones: int = 0
+    drone_delta_since_directive: int = 0
+
+
 class ExecutionFeedback(BaseModel):
     directive_id: str | None = None
+    overrides: list[OverrideRecord] = Field(default_factory=list)
+    results: ExecutionResults = Field(default_factory=ExecutionResults)
     goals: list[GoalStatus] = Field(default_factory=list)
 
 
@@ -124,6 +189,7 @@ class StateSummary(BaseModel):
     game_time: str = "0:00"
     matchup: str = "ZvT"
     map: str = "unknown"
+    regions: dict[str, Region] = Field(default_factory=dict)
     me: MyState = Field(default_factory=MyState)
     enemy: EnemyState = Field(default_factory=EnemyState)
     combat_sim: dict[str, float] = Field(default_factory=dict)
@@ -168,7 +234,7 @@ class IssuedDirective(Directive):
     directive_id: str
     issued_frame: int
     expires_frame: int
-    source: Literal["llm", "validator_fix", "ledger_hold", "fallback"] = "llm"
+    source: Literal["llm", "validator_fix", "ledger_hold", "fallback", "body_default"] = "llm"
 
 
 class AdvisorQuery(BaseModel):

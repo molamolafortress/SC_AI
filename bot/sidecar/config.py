@@ -22,6 +22,13 @@ class Triggers:
     idle_minerals_seconds: int = 10
     big_engagement_loss_value: int = 200
     min_hold_seconds: int = 20
+    # Start rule (audit item D): at game_start the body keeps its own defaults (observe-only directive) and the
+    # first real LLM call happens at the first intel/enemy trigger, or at first_call_deadline_seconds if nothing
+    # was scouted by then. decide_at_start: true restores the old behaviour (LLM call at frame 0).
+    decide_at_start: bool = False
+    first_call_deadline_seconds: int = 120
+    series_interval_seconds: int = 30   # time-series sampling interval (## 시계열 section)
+    series_max_rows: int = 40
 
 
 @dataclass

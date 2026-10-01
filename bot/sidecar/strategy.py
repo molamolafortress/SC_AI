@@ -48,6 +48,9 @@ class StrategyCaller:
         trigger = self.store.trigger(self.review_after_frame)
         if trigger is None:
             return
+        if trigger == "game_start" and not self.cfg.triggers.decide_at_start:
+            self._observe_start()
+            return
         if not self.store.is_transition_trigger(trigger) and not self.ledger.can_change(self.store.latest.frame):
             return
         effort = (self.cfg.models.strategy_effort_transition if self.store.is_transition_trigger(trigger)
@@ -60,6 +63,28 @@ class StrategyCaller:
         else:
             self._inflight = threading.Thread(target=self._run, args=(trigger, msg, effort, snapshot), daemon=True)
             self._inflight.start()
+
+    def _observe_start(self) -> None:
+        """Start rule (audit D): no LLM call at frame 0. Record an observe-only directive (body defaults) so the
+        body keeps its own opening; the first real call comes at the first intel/enemy trigger or at the deadline."""
+        s = self.store.latest
+        assert s is not None
+        stance = s.body_defaults.get("stance", "neutral")
+        if stance not in ("defensive", "neutral", "aggressive", "all_in"):
+            stance = "neutral"
+        issued = IssuedDirective(
+            observe_only=True, keep_current_plan=False,
+            change_reason="game_start: 정찰 전에는 몸체 기본값 유지 (관찰만)",
+            opening=s.body_defaults.get("opening", ""), stance=stance,
+            review_after_seconds=self.cfg.triggers.first_call_deadline_seconds,
+            directive_id=f"d-{next(self._ids):04d}", issued_frame=s.frame,
+            expires_frame=s.frame + self.cfg.frames(self.cfg.directive_ttl_seconds), source="body_default",
+        )
+        with self._lock:
+            self.ledger.record(issued, "game_start_observe", s.frame)
+            self.review_after_frame = None
+        self.store.mark_observing_start()
+        self.logger.log("directive", s.frame, output=issued.model_dump(), trigger="game_start_observe")
 
     # ---- the call itself ----------------------------------------------------------------
     def _run(self, trigger: str, msg: str, effort: str, snapshot: StateSummary) -> None:
@@ -97,7 +122,7 @@ class StrategyCaller:
             self.logger.log("validator", latest.frame, outcome="fixed", fixes=v.fixes)
         d = v.directive
         cur = self.ledger.current
-        if d.keep_current_plan and cur is not None:
+        if d.keep_current_plan and cur is not None and not cur.observe_only:
             d = cur.model_copy(update={"keep_current_plan": True, "change_reason": d.change_reason or cur.change_reason})
             source = "ledger_hold"
         else:

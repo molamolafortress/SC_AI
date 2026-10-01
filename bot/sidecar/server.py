@@ -40,7 +40,9 @@ class GameSession:
         self.strategy = StrategyCaller(cfg, self.knowledge, backend, self.store, self.ledger, self.logger,
                                        lockstep=(cfg.mode == "lockstep"))
         self.logger.log("session", first.frame, game_id=first.game_id, matchup=first.matchup, map=first.map,
-                        mode=cfg.mode, has_map_knowledge=bool(self.knowledge.map_knowledge))
+                        mode=cfg.mode, has_map_knowledge=bool(self.knowledge.map_knowledge),
+                        backend=type(backend).__name__, safety_interval_seconds=cfg.triggers.safety_interval_seconds,
+                        decide_at_start=cfg.triggers.decide_at_start)
 
     def on_state(self, s: StateSummary) -> IssuedDirective | None:
         self.store.ingest(s)
@@ -55,6 +57,8 @@ class GameSession:
             "cost_usd": round(self.logger.total_cost_usd, 4),
             "strategy_calls": self.logger.strategy_calls, "flip_flops": self.ledger.flip_flops,
             "validator_rejects": self.logger.validator_rejects, "directives": len(self.ledger.history),
+            "mode": self.cfg.mode, "backend": type(self.strategy.backend).__name__,
+            "safety_interval_seconds": self.cfg.triggers.safety_interval_seconds,
         }
         self.logger.log("result", frame, **summary)
         return summary
@@ -110,8 +114,7 @@ def create_app(cfg: SidecarConfig, backend: Backend) -> FastAPI:
         sess = sessions.get(game_id)
         if sess is None:
             return {"ok": False, "error": "unknown game"}
-        sess.store.pending_events.append(ev.type + (f":{ev.what}" if ev.what else ""))
-        sess.store.timeline.append(f"f{ev.frame} {ev.type}")
+        sess.store.add_event(ev)
         sess.logger.log("event", ev.frame, input=ev.model_dump())
         return {"ok": True}
 
