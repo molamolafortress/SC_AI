@@ -37,6 +37,24 @@ def test_validator_rejects_unknown_opening(tmp_path):
     assert not v.ok and "unknown opening" in v.rejected[0]
 
 
+def test_validator_drone_target_clamp_and_disable(tmp_path):
+    from bot.sidecar.validator import apply_disabled_levers
+    cfg = make_cfg(tmp_path)
+    k = Knowledge.load(cfg.knowledge_dir, "ZvT", "Fighting Spirit")
+    assert Directive().drone_target == {}
+    v = validate(Directive(drone_target={"total": 140, "priority": "turtle"}), k, None)
+    assert v.directive.drone_target == {"total": 90, "priority": "balanced"}
+    assert any("drone_target.total" in f for f in v.fixes) and any("priority" in f for f in v.fixes)
+    v = validate(Directive(drone_target={"total": 0, "priority": "economy"}), k, None)
+    assert v.directive.drone_target == {}
+    v = validate(Directive(drone_target={"total": 24.7, "priority": "economy", "override_opening": True}), k, None)
+    assert v.directive.drone_target == {"total": 24, "priority": "economy", "override_opening": True}
+    d = apply_disabled_levers(v.directive, ("drone_target",), None)
+    assert d.drone_target == {}
+    # body-side JSON: the field is served as-is (IssuedDirective is a Directive)
+    assert "drone_target" in Directive(drone_target={"total": 30}).model_dump()
+
+
 def test_end_to_end_lockstep_with_fake_llm(tmp_path):
     cfg = make_cfg(tmp_path)
     backend = FakeBackend()

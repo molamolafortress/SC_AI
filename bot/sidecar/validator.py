@@ -22,6 +22,8 @@ TECH_ALIASES = {
 }
 ZERG_UNITS = {"drone", "zergling", "hydralisk", "mutalisk", "lurker", "ultralisk", "defiler", "scourge",
               "guardian", "devourer", "overlord", "queen"}
+DRONE_TARGET_MAX = 90
+DRONE_PRIORITIES = ("economy", "balanced", "army")
 
 
 @dataclass
@@ -69,6 +71,7 @@ def validate(d: Directive, knowledge: Knowledge, state: StateSummary | None) -> 
             fixes.append(f"static_defense '{k}' -> '{key}'")
         sd[key] = max(sd.get(key, 0), int(v))
     d.static_defense = sd
+    d.drone_target = _clean_drone_target(d.drone_target, fixes)
     if not (0.0 <= d.confidence <= 1.0):
         d.confidence = max(0.0, min(1.0, d.confidence))
         fixes.append("clamped confidence")
@@ -81,6 +84,30 @@ def validate(d: Directive, knowledge: Knowledge, state: StateSummary | None) -> 
         d.stance = "aggressive"
 
     return ValidationResult(d, ok=not rejected, fixes=fixes, rejected=rejected)
+
+
+def _clean_drone_target(dt, fixes: list[str]) -> dict:
+    """{} when absent/invalid or total <= 0; otherwise total clamped to 1..DRONE_TARGET_MAX, priority in DRONE_PRIORITIES."""
+    if not isinstance(dt, dict) or not dt:
+        return {}
+    try:
+        total = int(float(dt.get("total", 0)))
+    except (TypeError, ValueError):
+        fixes.append("dropped drone_target (total not a number)")
+        return {}
+    if total <= 0:
+        return {}
+    if total > DRONE_TARGET_MAX:
+        fixes.append(f"drone_target.total {total} clamped to {DRONE_TARGET_MAX}")
+        total = DRONE_TARGET_MAX
+    priority = str(dt.get("priority", "balanced")).lower()
+    if priority not in DRONE_PRIORITIES:
+        fixes.append(f"drone_target.priority '{priority}' -> balanced")
+        priority = "balanced"
+    out = {"total": total, "priority": priority}
+    if bool(dt.get("override_opening", False)):
+        out["override_opening"] = True
+    return out
 
 
 def apply_disabled_levers(d: Directive, disabled: tuple, state: StateSummary | None) -> Directive:
@@ -103,6 +130,8 @@ def apply_disabled_levers(d: Directive, disabled: tuple, state: StateSummary | N
         d.expand_policy = "allow_when_safe"
     if "static_defense" in disabled:
         d.static_defense = {}
+    if "drone_target" in disabled:
+        d.drone_target = {}
     if "wall" in disabled:
         d.wall_natural = body.get("wall_natural", "none") or "none"
     return d

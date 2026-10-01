@@ -129,6 +129,10 @@ an iterator), which is what MSVC effectively did with the lifetime-extended temp
 New `McRave/Main/Sidecar.{h,cpp}` plus 35 one-line insertions in 7 files. Off unless
 `SIDECAR_HOST`/`SIDECAR_PORT` or `bwapi-data/sidecar.ini` is present. See `HOOKS_IMPL.md`.
 
+### 0007-hooks.patch (economy-lever call sites folded in) - `drone_target`
+Two `Sidecar::applyDroneTarget();` lines in `ZergBuildOrder.cpp composition()` (end of the opening-book branch and after
+`applyComposition()`), applied on top of 0007. The hook itself lives in `Sidecar.cpp` (0006). See `HOOKS_IMPL.md`, "Economy lever".
+
 ## Remaining warnings (gcc 13, `-Wall`, 203 lines)
 
 - 182x `backslash-newline at end of file` from `BWEB/Logger.h` and `McRave/Main/Logger.h`

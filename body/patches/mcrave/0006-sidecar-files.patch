@@ -1,9 +1,9 @@
 diff --git a/Source/McRave/Main/Sidecar.cpp b/Source/McRave/Main/Sidecar.cpp
 new file mode 100644
-index 0000000..45c5efa
+index 0000000..00b72c5
 --- /dev/null
 +++ b/Source/McRave/Main/Sidecar.cpp
-@@ -0,0 +1,1373 @@
+@@ -0,0 +1,1433 @@
 +// Sidecar: SC_AI hooks 1-3 for McRave. See Sidecar.h and body/mcrave_port/HOOKS_IMPL.md.
 +//
 +// The heavy headers (cpp-httplib, nlohmann/json) are confined to this translation unit. They are included before
@@ -1238,6 +1238,66 @@ index 0000000..45c5efa
 +        armyComposition = mix;
 +    }
 +
++    // Economy lever (drone_target). Runs as the last step of composition(), so it sees McRave's final armyComposition
++    // (and applyComposition()'s). Producing::updateLarva() picks the larva type by getCompositionPercentage(), and
++    // unlocks() derives unlockedType from armyComposition, so the drone weight set here is what decides whether the
++    // next larva becomes a drone. McRave's per-station hard cap stays (Producing::validLarva(): no drone when the
++    // closest station's saturation >= 2.0), so `total` can never exceed ~2x the mineral patches we own.
++    void applyDroneTarget()
++    {
++        auto &d = directive();
++        if (!d || d->drone_target_total <= 0)
++            return;
++        if (Broodwar->self()->getRace() != Races::Zerg)
++            return;
++        const int target  = d->drone_target_total;
++        const int current = vis(Zerg_Drone);
++        const string before = compositionString(armyComposition);
++        const string want   = "total=" + to_string(target) + "," + norm(d->drone_target_priority) + ",have=" + to_string(current);
++        if (inOpening && !d->drone_target_override_opening) {
++            recordOverride("drone_target", false, before, want, "opening book (override_opening=false)");
++            return;
++        }
++        auto priority = norm(d->drone_target_priority);
++        if (priority != "economy" && priority != "army") priority = "balanced";
++
++        if (current >= target) {
++            // At/above target: stop droning. If that empties the composition, McRave's own fallback is lings.
++            armyComposition.erase(Zerg_Drone);
++            bool anyArmy = false;
++            for (auto &[t, w] : armyComposition) if (w > 0.0) anyArmy = true;
++            if (!anyArmy && com(Zerg_Spawning_Pool) > 0)
++                armyComposition[Zerg_Zergling] = 1.0;
++            recordOverride("drone_target", true, before, compositionString(armyComposition), "target reached, droning stopped");
++            return;
++        }
++
++        // Below target.
++        if (priority == "economy") {
++            // All larva to drones until the target is reached (same shape as the opening book's zergUnitPump[Drone]).
++            armyComposition.clear();
++            armyComposition[Zerg_Drone] = 1.0;
++        }
++        else if (priority == "balanced") {
++            // Drones compete with McRave's army picks; Producing::scoreUnit() = percentage / trained count, so the rarer type wins.
++            armyComposition[Zerg_Drone] = 1.0;
++            // McRave's "lings when saturated" fallback (ling=1, drone=0) would out-score drones (fewer lings than drones);
++            // drop it when lings are the only army entry. Tech units chosen by the priority ladder stay.
++            bool otherArmy = false;
++            for (auto &[t, w] : armyComposition) if (t != Zerg_Drone && t != Zerg_Zergling && w > 0.0) otherArmy = true;
++            if (!otherArmy) armyComposition.erase(Zerg_Zergling);
++        }
++        else { // "army": McRave's army composition first; drones only when it asks for nothing else
++            bool anyArmy = false;
++            for (auto &[t, w] : armyComposition) if (t != Zerg_Drone && w > 0.0) anyArmy = true;
++            if (!anyArmy) {
++                armyComposition.clear();
++                armyComposition[Zerg_Drone] = 1.0;
++            }
++        }
++        recordOverride("drone_target", true, before, compositionString(armyComposition), "below target by " + to_string(target - current) + ", priority " + priority);
++    }
++
 +    void applyExpandPolicy(int hatchCount)
 +    {
 +        auto &d = directive();
@@ -1379,10 +1439,10 @@ index 0000000..45c5efa
 +} // namespace McRave::Sidecar
 diff --git a/Source/McRave/Main/Sidecar.h b/Source/McRave/Main/Sidecar.h
 new file mode 100644
-index 0000000..10ec82a
+index 0000000..1fc6a84
 --- /dev/null
 +++ b/Source/McRave/Main/Sidecar.h
-@@ -0,0 +1,57 @@
+@@ -0,0 +1,58 @@
 +// Sidecar: SC_AI hooks (body/HOOKS.md section 5). Thin wrapper around body/sidecar_client/{SidecarClient,StateTracker}.hpp.
 +//
 +// Enabled only when env SIDECAR_HOST or SIDECAR_PORT is set, or bwapi-data/sidecar.ini exists. Otherwise every
@@ -1430,6 +1490,7 @@ index 0000000..10ec82a
 +    void applyTechPriority();                                 // ZergBuildOrder.cpp tech(), before the unitOrder loop
 +    bool techPriorityActive();                                // ZergBuildOrder.cpp switchComposition(), top: skip McRave's switch
 +    void applyComposition();                                  // ZergBuildOrder.cpp composition(), last statement
++    void applyDroneTarget();                                  // ZergBuildOrder.cpp composition(), after applyComposition() and before the inOpening return
 +    void applyExpandPolicy(int hatchCount);                   // ZergBuildOrder.cpp queueExpansions(), after buildQueue[Hatchery] = max(..)
 +    void applyStance(std::vector<BWAPI::UnitType> &staticRetreatTypes); // Combat/State.cpp updateStaticStates(), after updateZStaticStates()
 +    void applyAttackPosition(BWAPI::Position &attackPosition);          // Combat.cpp onFrame(), after findAttackPosition()

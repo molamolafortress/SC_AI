@@ -1,7 +1,8 @@
 # McRave hooks 1-3: implementation notes
 
 Implements `body/HOOKS.md` section 5 on McRave @ `7d1719a2` as two extra patches on top of the
-Linux port (`body/patches/mcrave/0006-sidecar-files.patch`, `0007-hooks.patch`). Status
+Linux port (`body/patches/mcrave/0006-sidecar-files.patch`, `0007-hooks.patch`; `0007-hooks.patch (economy-lever call sites folded in)` adds the
+`drone_target` call sites, see "Economy lever"). Status
 (2026-10-01): builds with zero errors (`ninja -C build/mcrave`, 114 TUs, `-Wl,--no-undefined`),
 verified pristine -> `apply_patches.sh` -> rebuild gives an identical symbol table; **not run in a
 game** (no MPQ data in this container).
@@ -85,6 +86,7 @@ are not reset per frame by McRave either).
 | `expand_policy` | `ZergBuildOrder.cpp queueExpansions()`, after `buildQueue[Zerg_Hatchery] = max(...)` (inside `if (!inOpening)`) -> `Sidecar::applyExpandPolicy(hatchCount())` | `never`: `expandDesired=false`, `wantThird=false`, `wantNatural=false` once 2 stations, hatchery queue capped to `hatchCount()`. `greedy`: when no hatchery is in progress and <=5 mining stations, `expandDesired=true`, queue `hatchCount()+1`, `wantNatural/wantThird` by station count. `allow_when_safe`: McRave. Inert during the opening book (the opener's hatch count is the validator's job). |
 | `stance` | `Micro/Combat/State.cpp updateStaticStates()`, after `updateZStaticStates()` -> `Sidecar::applyStance(staticRetreatTypes)` | `defensive`: every unlocked Zerg army type is pushed into `staticRetreatTypes` (global retreat). `aggressive`/`all_in`: `staticRetreatTypes.clear()` (workers are re-added by the lines that follow). `neutral`: McRave. `pressure` is set only for `all_in` (see above), because `isPressure()` also zeroes static defenses. |
 | `army_objective` | `Micro/Combat/Combat.cpp onFrame()`: after `findAttackPosition()` -> `Sidecar::applyAttackPosition(attackPosition)`; after `findDefendPosition()` -> `Sidecar::applyDefendPosition(defendNatural, holdNatural, defendChoke, defendArea, defendPosition, defendStation)` | type `attack|contain|harass` + `enemy_main|enemy_natural`: `attackPosition = station->getResourceCentroid()` only if that station is enemy-owned (else McRave's target). type `defend|hold` + `natural`: natural choke/area/`Stations::getDefendPosition` only if we own the natural; `main`: main choke. Other locations: no override (coordinates stay body-side). |
+| `drone_target {total, priority, override_opening}` | `ZergBuildOrder.cpp composition()`: last statement after `Sidecar::applyComposition()`, and before the `return` of the `if (inOpening)` branch (0008) -> `Sidecar::applyDroneTarget()` | Economy lever, see "Economy lever" below. `total<=0` or absent: no override. Inert while `inOpening` unless `override_opening=true`. |
 | `static_defense {sunken, spore}` | `Map/Walls/Walls.cpp updateDefenses(wall)` (feeds `needGroundDefenses/needAirDefenses(wall)`) and `Map/Stations/Stations.cpp needGroundDefenses/needAirDefenses(station)` top | desired count minus current count, for the **natural only**: the natural wall if McRave built one, otherwise the natural station. Main/third stations keep McRave's tables. BWEB placement and `queueDefenses()` are untouched. |
 
 ### Opening-name mapping (`Sidecar.cpp openingTable`)
@@ -239,3 +241,56 @@ The regions in a dump are for the start position the dumping game happened to ge
 `SidecarClient` appends every posted StateSummary as one JSON line (written by the POST thread, not the game thread), so the
 payload can be checked without the sidecar. `tools/run_game_openbw.sh` forwards `SC_AI_DUMP_STATE` and `SC_AI_MAP_DUMP` to our
 side only (and unsets them for the opponent), like the other `SC_AI_*` variables.
+
+## Economy lever: `drone_target` (2026-10-01, patch 0008)
+
+Why: the first ZvZ A/B (docs/eval_log.md) showed the LLM cannot move the economy. `unit_mix_target: {drone: 0.6}` is applied to
+`armyComposition`, but McRave's droning is decided by its own ladder and saturation checks, and a 0.6 weight competes with army
+units on `Producing::scoreUnit()` (= `percentage / trained count`), so with 20 drones and 8 mutas the muta always wins.
+
+### How McRave drones (what the lever overrides)
+
+Outside the opening book, `Builds/Zerg/ZergBuildOrder.cpp composition()` (every frame, from `BuildOrder::updateBuild()`):
+
+1. `switchComposition()` then a per-transition `priorityOrder` ladder (`{Drone, 30}, {Muta, 16}, {Drone, 45}, ...`): the first
+   entry whose count is not reached becomes the one-hot `armyComposition`; a `Drone` entry is "available" only while
+   `!Resources::isMineralSaturated() || !Resources::isGasSaturated()`, so once saturated the ladder skips to army.
+2. Fallback when nothing was picked or gas is 0: lings if `zergUnitPump[Zergling]` / `vis(Drone) >= droneCap(60)` / saturated,
+   else drones.
+3. `unlocks()` turns every `armyComposition` key with weight > 0 into `unlockedType`; `Producing::isSuitable()` refuses anything
+   else, and `Producing::updateLarva()` scores the remaining larva types by `getCompositionPercentage(type) / trained`.
+4. Hard cap in `Producing::validLarva()`: no drone from a larva whose closest station has `getSaturationRatio() >= 2.0`
+   (unless workers can be transferred). This is a physical limit the lever does not remove.
+
+Inside the opening book the same function returns early after the `zergUnitPump` one-hot (the opener files set
+`zergUnitPump[Zerg_Drone]`), so droning there is the book's business.
+
+### What `applyDroneTarget()` does (`Main/Sidecar.cpp`, called as the last step of both branches of `composition()`)
+
+With `d = directive()`, `target = drone_target.total`, `current = vis(Zerg_Drone)`:
+
+- `target <= 0`: nothing. `inOpening && !override_opening`: `recordOverride("drone_target", false, ..., "opening book")`, nothing.
+- `current >= target`: `armyComposition.erase(Drone)`; if no army entry remains and the pool is done, `Zergling = 1.0`
+  (McRave's own fallback shape). Droning stops on the next larva because `unlocks()` no longer unlocks `Zerg_Drone`.
+- `current < target`, by `priority`:
+  - `economy`: `armyComposition = {Drone: 1.0}` (one-hot, like the opening book's drone pump): every larva becomes a drone
+    until the target, or the 2.0 station saturation cap, is hit.
+  - `balanced` (default): `armyComposition[Drone] = 1.0` next to McRave's picks; the `Zergling` entry is dropped when it is the
+    only army entry (McRave's "lings when saturated" fallback), tech units from the ladder stay. `scoreUnit()` then prefers
+    whichever type is rarer relative to its weight, and gas-starved tech units score -1, so larva alternate between drones and
+    the tech unit instead of all-lings.
+  - `army`: McRave's composition stays; drones are only forced when it requests no army type (i.e. the lever only acts as a
+    cap plus "drone when idle").
+
+Execution feedback: field `drone_target`, before = McRave's composition, after = the composition applied, note =
+`below target by n, priority p` / `target reached, droning stopped` / `opening book (override_opening=false)`. The Python
+ledger prints `목표 N` next to the drone count in the feedback section.
+
+Interactions: `unit_mix_target` with a `drone` weight is applied first (`applyComposition()`), `drone_target` then owns the
+drone entry. `expand_policy=never` plus a high target saturates to 2.0 per station and stops; `greedy` plus `economy` is the
+"drone up" combination. Nothing in Workers/Resources is touched: gas worker counts (`gasLimit = drones/3..5`) and station
+transfers stay McRave's.
+
+Patch: `0007-hooks.patch (economy-lever call sites folded in)` = the two `Sidecar::applyDroneTarget();` lines in `ZergBuildOrder.cpp composition()` (on top of
+0007); the function itself is in 0006 (`Sidecar.h/.cpp`). `apply_patches.sh` picks it up by the `NNNN-*.patch` glob.
+Built in `build/mcrave_econ` (not in a game yet).

@@ -37,7 +37,7 @@ class Triggers:
 @dataclass
 class Levers:
     """Which directive fields may override the body. Disabled levers are reset to "no override" before issuing."""
-    disabled: tuple = ()   # any of: opening, unit_mix, tech_priority, stance, objective, expand_policy, static_defense, wall
+    disabled: tuple = ()   # any of: opening, unit_mix, tech_priority, stance, objective, expand_policy, static_defense, wall, drone_target
 
 
 @dataclass

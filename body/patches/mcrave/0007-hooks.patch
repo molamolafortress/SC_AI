@@ -1,3 +1,85 @@
+diff --git a/Source/McRave/Builds/All/BuildOrder.cpp b/Source/McRave/Builds/All/BuildOrder.cpp
+index 63518a7..63bfe68 100644
+--- a/Source/McRave/Builds/All/BuildOrder.cpp
++++ b/Source/McRave/Builds/All/BuildOrder.cpp
+@@ -10,6 +10,7 @@
+ #include "Info/Resource/Resources.h"
+ #include "Macro/Upgrading/Upgrading.h"
+ #include "Main/Common.h"
++#include "Main/Sidecar.h"
+ #include "Main/Visuals.h"
+ #include "Map/Terrain/Terrain.h"
+ #include "Strategy/Spy/Spy.h"
+@@ -49,6 +50,7 @@ namespace McRave::BuildOrder {
+             if (Players::getSupply(PlayerState::Self, Races::Zerg) > 0) {
+                 s = Players::getSupply(PlayerState::Self, Races::Zerg);
+                 Zerg::opener();
++                Sidecar::applyBuildFlags();
+                 Zerg::tech();
+                 Zerg::composition();
+                 Zerg::situational();
+diff --git a/Source/McRave/Builds/Zerg/ZergBuildOrder.cpp b/Source/McRave/Builds/Zerg/ZergBuildOrder.cpp
+index d907048..e67c20d 100644
+--- a/Source/McRave/Builds/Zerg/ZergBuildOrder.cpp
++++ b/Source/McRave/Builds/Zerg/ZergBuildOrder.cpp
+@@ -10,6 +10,7 @@
+ #include "Macro/Producing/Producing.h"
+ #include "Macro/Researching/Researching.h"
+ #include "Macro/Upgrading/Upgrading.h"
++#include "Main/Sidecar.h"
+ #include "Map/Stations/Stations.h"
+ #include "Map/Terrain/Terrain.h"
+ #include "Map/Walls/Walls.h"
+@@ -37,6 +38,8 @@ namespace McRave::BuildOrder::Zerg {
+ 
+         void switchComposition()
+         {
++            if (Sidecar::techPriorityActive())
++                return;
+             static auto lastSwitchTime = Time(8, 00);
+ 
+             // For certain switches, we don't want to start producing anything until we're actually ready
+@@ -394,6 +397,7 @@ namespace McRave::BuildOrder::Zerg {
+                 }
+ 
+                 buildQueue[Zerg_Hatchery] = max(buildQueue[Zerg_Hatchery], hatchCount() + expandDesired);
++                Sidecar::applyExpandPolicy(hatchCount());
+ 
+                 if (expandDesired && int(Stations::getStations(PlayerState::Self).size()) <= 1)
+                     wantNatural = true;
+@@ -754,6 +758,7 @@ namespace McRave::BuildOrder::Zerg {
+         }
+ 
+         zergUnitPump.clear();
++        Sidecar::applyOpening();
+         if (Players::vT())
+             ZvT();
+         else if (Players::vP() || againstRandom)
+@@ -791,6 +796,7 @@ namespace McRave::BuildOrder::Zerg {
+             unitOrder = {Zerg_Mutalisk, Zerg_Hydralisk, Zerg_Lurker};
+ 
+         // Ensure anything we already made is added into the list
++        Sidecar::applyTechPriority();
+         auto focusUnitSize = 0 - isFocusUnit(Zerg_Zergling);
+         for (auto unit : unitOrder) {
+             if (unlockReady(unit)) {
+@@ -894,6 +900,7 @@ namespace McRave::BuildOrder::Zerg {
+                 armyComposition[Zerg_Zergling] = 1.00;
+             else if (zergUnitPump[Zerg_Drone])
+                 armyComposition[Zerg_Drone] = 1.00;
++            Sidecar::applyDroneTarget();
+             return;
+         }
+ 
+@@ -1059,6 +1066,8 @@ namespace McRave::BuildOrder::Zerg {
+                 armyComposition[Zerg_Zergling] = 0.0;
+             }
+         }
++        Sidecar::applyComposition();
++        Sidecar::applyDroneTarget();
+     }
+ 
+     void unlocks()
 diff --git a/Source/McRave/Main/McRave.cpp b/Source/McRave/Main/McRave.cpp
 index 0c0f6b0..87fde84 100644
 --- a/Source/McRave/Main/McRave.cpp
@@ -62,142 +144,6 @@ index 0c0f6b0..87fde84 100644
  
  void McRaveModule::onUnitMorph(Unit unit) { Events::onUnitMorph(unit); }
  
-diff --git a/Source/McRave/Builds/All/BuildOrder.cpp b/Source/McRave/Builds/All/BuildOrder.cpp
-index 63518a7..63bfe68 100644
---- a/Source/McRave/Builds/All/BuildOrder.cpp
-+++ b/Source/McRave/Builds/All/BuildOrder.cpp
-@@ -10,6 +10,7 @@
- #include "Info/Resource/Resources.h"
- #include "Macro/Upgrading/Upgrading.h"
- #include "Main/Common.h"
-+#include "Main/Sidecar.h"
- #include "Main/Visuals.h"
- #include "Map/Terrain/Terrain.h"
- #include "Strategy/Spy/Spy.h"
-@@ -49,6 +50,7 @@ namespace McRave::BuildOrder {
-             if (Players::getSupply(PlayerState::Self, Races::Zerg) > 0) {
-                 s = Players::getSupply(PlayerState::Self, Races::Zerg);
-                 Zerg::opener();
-+                Sidecar::applyBuildFlags();
-                 Zerg::tech();
-                 Zerg::composition();
-                 Zerg::situational();
-diff --git a/Source/McRave/Builds/Zerg/ZergBuildOrder.cpp b/Source/McRave/Builds/Zerg/ZergBuildOrder.cpp
-index d907048..a3f36e0 100644
---- a/Source/McRave/Builds/Zerg/ZergBuildOrder.cpp
-+++ b/Source/McRave/Builds/Zerg/ZergBuildOrder.cpp
-@@ -10,6 +10,7 @@
- #include "Macro/Producing/Producing.h"
- #include "Macro/Researching/Researching.h"
- #include "Macro/Upgrading/Upgrading.h"
-+#include "Main/Sidecar.h"
- #include "Map/Stations/Stations.h"
- #include "Map/Terrain/Terrain.h"
- #include "Map/Walls/Walls.h"
-@@ -37,6 +38,8 @@ namespace McRave::BuildOrder::Zerg {
- 
-         void switchComposition()
-         {
-+            if (Sidecar::techPriorityActive())
-+                return;
-             static auto lastSwitchTime = Time(8, 00);
- 
-             // For certain switches, we don't want to start producing anything until we're actually ready
-@@ -394,6 +397,7 @@ namespace McRave::BuildOrder::Zerg {
-                 }
- 
-                 buildQueue[Zerg_Hatchery] = max(buildQueue[Zerg_Hatchery], hatchCount() + expandDesired);
-+                Sidecar::applyExpandPolicy(hatchCount());
- 
-                 if (expandDesired && int(Stations::getStations(PlayerState::Self).size()) <= 1)
-                     wantNatural = true;
-@@ -754,6 +758,7 @@ namespace McRave::BuildOrder::Zerg {
-         }
- 
-         zergUnitPump.clear();
-+        Sidecar::applyOpening();
-         if (Players::vT())
-             ZvT();
-         else if (Players::vP() || againstRandom)
-@@ -791,6 +796,7 @@ namespace McRave::BuildOrder::Zerg {
-             unitOrder = {Zerg_Mutalisk, Zerg_Hydralisk, Zerg_Lurker};
- 
-         // Ensure anything we already made is added into the list
-+        Sidecar::applyTechPriority();
-         auto focusUnitSize = 0 - isFocusUnit(Zerg_Zergling);
-         for (auto unit : unitOrder) {
-             if (unlockReady(unit)) {
-@@ -1059,6 +1065,7 @@ namespace McRave::BuildOrder::Zerg {
-                 armyComposition[Zerg_Zergling] = 0.0;
-             }
-         }
-+        Sidecar::applyComposition();
-     }
- 
-     void unlocks()
-diff --git a/Source/McRave/Micro/Combat/State.cpp b/Source/McRave/Micro/Combat/State.cpp
-index c0296d1..68ff98f 100644
---- a/Source/McRave/Micro/Combat/State.cpp
-+++ b/Source/McRave/Micro/Combat/State.cpp
-@@ -3,6 +3,7 @@
- #include "Info/Player/Players.h"
- #include "Info/Unit/Units.h"
- #include "Macro/Upgrading/Upgrading.h"
-+#include "Main/Sidecar.h"
- #include "Map/Stations/Stations.h"
- #include "Map/Terrain/Terrain.h"
- #include "Strategy/Actions/Actions.h"
-@@ -306,6 +307,7 @@ namespace McRave::Combat::State {
-         updatePStaticStates();
-         updateTStaticStates();
-         updateZStaticStates();
-+        Sidecar::applyStance(staticRetreatTypes);
- 
-         // Workers
-         for (auto type : {Protoss_Probe, Terran_SCV, Zerg_Drone}) {
-diff --git a/Source/McRave/Micro/Combat/Combat.cpp b/Source/McRave/Micro/Combat/Combat.cpp
-index 461dda5..0253ce7 100644
---- a/Source/McRave/Micro/Combat/Combat.cpp
-+++ b/Source/McRave/Micro/Combat/Combat.cpp
-@@ -3,6 +3,7 @@
- #include "Builds/All/BuildOrder.h"
- #include "Info/Player/Players.h"
- #include "Info/Unit/Units.h"
-+#include "Main/Sidecar.h"
- #include "Map/Grids/Grids.h"
- #include "Map/Stations/Stations.h"
- #include "Map/Terrain/Terrain.h"
-@@ -356,7 +357,9 @@ namespace McRave::Combat {
-     void onFrame()
-     {
-         findAttackPosition();
-+        Sidecar::applyAttackPosition(attackPosition);
-         findDefendPosition();
-+        Sidecar::applyDefendPosition(defendNatural, holdNatural, defendChoke, defendArea, defendPosition, defendStation);
-         findHarassPosition();
-         checkHoldChoke();
-         Simulation::onFrame();
-diff --git a/Source/McRave/Map/Walls/Walls.cpp b/Source/McRave/Map/Walls/Walls.cpp
-index d12c31d..38f34cd 100644
---- a/Source/McRave/Map/Walls/Walls.cpp
-+++ b/Source/McRave/Map/Walls/Walls.cpp
-@@ -6,6 +6,7 @@
- #include "Info/Player/Players.h"
- #include "Info/Unit/Units.h"
- #include "Main/Common.h"
-+#include "Main/Sidecar.h"
- #include "Map/Stations/Stations.h"
- #include "Map/Terrain/Terrain.h"
- #include "Micro/Combat/Combat.h"
-@@ -279,6 +280,8 @@ namespace McRave::Walls {
-         {
-             desiredGroundDefenses[&wall] = calcDesiredGroundDefenses(wall);
-             desiredAirDefenses[&wall]    = calcDesiredAirDefenses(wall);
-+            if (auto n = Sidecar::groundDefensesFor(&wall)) desiredGroundDefenses[&wall] = *n;
-+            if (auto n = Sidecar::airDefensesFor(&wall)) desiredAirDefenses[&wall] = *n;
-         }
- 
-     } // namespace
 diff --git a/Source/McRave/Map/Stations/Stations.cpp b/Source/McRave/Map/Stations/Stations.cpp
 index 2493d4b..5a932fe 100644
 --- a/Source/McRave/Map/Stations/Stations.cpp
@@ -228,3 +174,66 @@ index 2493d4b..5a932fe 100644
          // We don't want to pull workers to build things if none are nearby
          if (getSaturationRatio(station) == 0.0 && getColonyCount(station) == 0)
              return 0;
+diff --git a/Source/McRave/Map/Walls/Walls.cpp b/Source/McRave/Map/Walls/Walls.cpp
+index d12c31d..38f34cd 100644
+--- a/Source/McRave/Map/Walls/Walls.cpp
++++ b/Source/McRave/Map/Walls/Walls.cpp
+@@ -6,6 +6,7 @@
+ #include "Info/Player/Players.h"
+ #include "Info/Unit/Units.h"
+ #include "Main/Common.h"
++#include "Main/Sidecar.h"
+ #include "Map/Stations/Stations.h"
+ #include "Map/Terrain/Terrain.h"
+ #include "Micro/Combat/Combat.h"
+@@ -279,6 +280,8 @@ namespace McRave::Walls {
+         {
+             desiredGroundDefenses[&wall] = calcDesiredGroundDefenses(wall);
+             desiredAirDefenses[&wall]    = calcDesiredAirDefenses(wall);
++            if (auto n = Sidecar::groundDefensesFor(&wall)) desiredGroundDefenses[&wall] = *n;
++            if (auto n = Sidecar::airDefensesFor(&wall)) desiredAirDefenses[&wall] = *n;
+         }
+ 
+     } // namespace
+diff --git a/Source/McRave/Micro/Combat/Combat.cpp b/Source/McRave/Micro/Combat/Combat.cpp
+index 461dda5..0253ce7 100644
+--- a/Source/McRave/Micro/Combat/Combat.cpp
++++ b/Source/McRave/Micro/Combat/Combat.cpp
+@@ -3,6 +3,7 @@
+ #include "Builds/All/BuildOrder.h"
+ #include "Info/Player/Players.h"
+ #include "Info/Unit/Units.h"
++#include "Main/Sidecar.h"
+ #include "Map/Grids/Grids.h"
+ #include "Map/Stations/Stations.h"
+ #include "Map/Terrain/Terrain.h"
+@@ -356,7 +357,9 @@ namespace McRave::Combat {
+     void onFrame()
+     {
+         findAttackPosition();
++        Sidecar::applyAttackPosition(attackPosition);
+         findDefendPosition();
++        Sidecar::applyDefendPosition(defendNatural, holdNatural, defendChoke, defendArea, defendPosition, defendStation);
+         findHarassPosition();
+         checkHoldChoke();
+         Simulation::onFrame();
+diff --git a/Source/McRave/Micro/Combat/State.cpp b/Source/McRave/Micro/Combat/State.cpp
+index c0296d1..68ff98f 100644
+--- a/Source/McRave/Micro/Combat/State.cpp
++++ b/Source/McRave/Micro/Combat/State.cpp
+@@ -3,6 +3,7 @@
+ #include "Info/Player/Players.h"
+ #include "Info/Unit/Units.h"
+ #include "Macro/Upgrading/Upgrading.h"
++#include "Main/Sidecar.h"
+ #include "Map/Stations/Stations.h"
+ #include "Map/Terrain/Terrain.h"
+ #include "Strategy/Actions/Actions.h"
+@@ -306,6 +307,7 @@ namespace McRave::Combat::State {
+         updatePStaticStates();
+         updateTStaticStates();
+         updateZStaticStates();
++        Sidecar::applyStance(staticRetreatTypes);
+ 
+         // Workers
+         for (auto type : {Protoss_Probe, Terran_SCV, Zerg_Drone}) {

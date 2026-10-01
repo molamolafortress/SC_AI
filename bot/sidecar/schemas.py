@@ -220,6 +220,9 @@ class Directive(BaseModel):
     army_objective: ArmyObjective = Field(default_factory=ArmyObjective)
     wall_natural: str = "none"
     static_defense: dict[str, int] = Field(default_factory=dict)
+    # Economy lever: {"total": int (desired drone count, 0/absent = no override), "priority": "economy|balanced|army",
+    # "override_opening": bool (default false: inert while the body's opening book runs)}.
+    drone_target: dict = Field(default_factory=dict)
     scout_policy: str = "overlord_on_path"
     confidence: float = 0.5
     review_after_seconds: int = 45

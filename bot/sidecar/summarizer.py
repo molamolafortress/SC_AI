@@ -13,6 +13,7 @@ Rules:
 - Use only opening names from the build database, and only wall/location names from the map knowledge.
 - Prefer keeping the current plan unless new information changes the assessment; if you change it, say why in change_reason.
 - Be concrete: unit_mix_target fractions must sum to about 1.0; tech_priority is ordered.
+- drone_target {"total": N, "priority": "economy|balanced|army"} sets the body's desired drone count; use it to drone up or stop droning (omit it to leave droning to the body).
 - Think about what the enemy's scouted buildings and timings imply about their next 2-3 minutes: fill
   enemy_build_guess, expected_threats and our_response from the intel brief before choosing the other fields.
 - If the body cannot execute something (no wall defined for this map), do not ask for it.

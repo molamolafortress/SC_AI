@@ -4,6 +4,8 @@
 # applies nor reverse-applies aborts with the failing name. Usage:
 #   body/mcrave_port/apply_patches.sh            # apply
 #   body/mcrave_port/apply_patches.sh --reverse  # undo (reverse order)
+# Patches: 0001-0005 Linux port, 0006 Sidecar.{h,cpp} (intent-to-add diff), 0007 hook call sites,
+# 0008 economy lever (drone_target call sites in ZergBuildOrder.cpp composition(), on top of 0007).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"

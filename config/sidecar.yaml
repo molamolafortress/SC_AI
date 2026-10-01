@@ -23,3 +23,7 @@ models:
   strategy_effort_transition: medium
   advisor_model: claude-haiku-4-5
   advisor_enabled: false
+levers:
+  # Ablation 2026-10-01 (ZvZ mirror, 12 games each): static_defense requests cost drones and lowered the win rate
+  # (full 5/12 vs without static_defense 7/12, drones at 6:00 9.7 -> 11.4). Disabled until a smarter gate exists.
+  disabled: [static_defense]

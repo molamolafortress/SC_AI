@@ -37,7 +37,8 @@ class PlanLedger:
                 self.flip_flops += 1
         requested = {"static_defense": dict(directive.static_defense), "unit_mix_target": dict(directive.unit_mix_target),
                      "stance": directive.stance, "expand_policy": directive.expand_policy, "opening": directive.opening,
-                     "army_objective": directive.army_objective.model_dump(), "tech_priority": list(directive.tech_priority)}
+                     "army_objective": directive.army_objective.model_dump(), "tech_priority": list(directive.tech_priority),
+                     "drone_target": dict(directive.drone_target)}
         self.history.append(LedgerEntry(directive, trigger, frame, requested))
 
     def entry_for(self, directive_id: str | None) -> LedgerEntry | None:
@@ -95,7 +96,9 @@ def feedback_text(ledger: PlanLedger, ex: ExecutionFeedback) -> str:
     else:
         lines.append(f"실제 조성: 병력 없음 vs 목표 {mix}")
     sign = "+" if r.drone_delta_since_directive >= 0 else ""
-    lines.append(f"드론: {r.drones} (지시 이후 {sign}{r.drone_delta_since_directive})")
+    dt = req.get("drone_target") or {}
+    target = f", 목표 {dt.get('total')}" if dt.get("total") else ""
+    lines.append(f"드론: {r.drones} (지시 이후 {sign}{r.drone_delta_since_directive}{target})")
     if ex.goals:
         lines.append("목표 상태: " + ", ".join(f"{g.goal}={g.status}" for g in ex.goals))
     return "\n".join(lines)

@@ -45,6 +45,11 @@ struct Directive {
     std::string objective_location = "natural";
     std::string wall_natural = "none";
     std::map<std::string, int> static_defense;
+    // Economy lever: desired total drone count (0 = no override), priority economy|balanced|army,
+    // override_opening lets it act while McRave's opening book is still running (off by default).
+    int drone_target_total = 0;
+    std::string drone_target_priority = "balanced";
+    bool drone_target_override_opening = false;
     std::string scout_policy;
     double confidence = 0.0;
     std::string change_reason;
@@ -70,6 +75,12 @@ struct Directive {
         }
         d.wall_natural = j.value("wall_natural", "none");
         if (j.contains("static_defense")) d.static_defense = j["static_defense"].get<std::map<std::string, int>>();
+        if (j.contains("drone_target") && j["drone_target"].is_object()) {
+            const auto& dt = j["drone_target"];
+            d.drone_target_total = dt.value("total", 0);
+            d.drone_target_priority = dt.value("priority", "balanced");
+            d.drone_target_override_opening = dt.value("override_opening", false);
+        }
         d.scout_policy = j.value("scout_policy", "");
         d.confidence = j.value("confidence", 0.0);
         d.change_reason = j.value("change_reason", "");
