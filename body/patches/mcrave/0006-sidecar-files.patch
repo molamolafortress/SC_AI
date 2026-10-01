@@ -1,9 +1,9 @@
 diff --git a/Source/McRave/Main/Sidecar.cpp b/Source/McRave/Main/Sidecar.cpp
 new file mode 100644
-index 0000000..038e852
+index 0000000..bdda481
 --- /dev/null
 +++ b/Source/McRave/Main/Sidecar.cpp
-@@ -0,0 +1,591 @@
+@@ -0,0 +1,602 @@
 +// Sidecar: SC_AI hooks 1-3 for McRave. See Sidecar.h and body/mcrave_port/HOOKS_IMPL.md.
 +//
 +// The heavy headers (cpp-httplib, nlohmann/json) are confined to this translation unit. They are included before
@@ -92,6 +92,7 @@ index 0000000..038e852
 +        optional<Directive> current;   // valid for this frame, or empty
 +        const optional<Directive> none;
 +        string lastLoggedId;
++        bool timedOut = false;
 +        set<string> warnedNames;
 +
 +        // Hook 3 metering (no McRave edits): units whose last command was issued this frame.
@@ -332,9 +333,17 @@ index 0000000..038e852
 +
 +    void onFrame()
 +    {
++        const int frame = Broodwar->getFrameCount();
++        // Frame cap (eval harness): SC_AI_MAX_FRAMES. Leaving counts as a timeout, not a win.
++        static int maxFrames = [] { const char* v = std::getenv("SC_AI_MAX_FRAMES"); return v ? std::atoi(v) : 0; }();
++        if (maxFrames > 0 && frame >= maxFrames && !timedOut) {
++            timedOut = true;
++            LOG("Sidecar: frame cap ", maxFrames, " reached, leaving game");
++            Broodwar->leaveGame();
++            return;
++        }
 +        if (!enabled())
 +            return;
-+        const int frame = Broodwar->getFrameCount();
 +        current = client->directive();
 +        if (current && !current->valid(frame))
 +            current.reset();
@@ -378,14 +387,16 @@ index 0000000..038e852
 +    {
 +        if (!enabled())
 +            return;
-+        LOG("Sidecar: game end, ", isWinner ? "win" : "loss", ", posts ", client->postsSent(), " failed ", client->postsFailed(), ", commands ", commandsTotal);
-+        client->onEnd(isWinner);
++        const std::string result = timedOut ? "timeout" : (isWinner ? "win" : "loss");
++        LOG("Sidecar: game end, ", result, ", posts ", client->postsSent(), " failed ", client->postsFailed(), ", commands ", commandsTotal);
++        client->onEnd(result);
 +        client.reset();
 +        tracker.reset();
 +        current.reset();
 +    }
 +
-+    const optional<Directive> &directive() { return enabled() ? current : none; }
++    // Directive for the override hooks: empty when disabled or when the sidecar only observes (baseline runs).
++    const optional<Directive> &directive() { return (enabled() && current && !current->observe_only) ? current : none; }
 +
 +    // ---- hook 1 ------------------------------------------------------------------------------------------------
 +    void applyOpening()

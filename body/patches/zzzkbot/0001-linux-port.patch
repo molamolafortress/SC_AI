@@ -1,0 +1,204 @@
+diff --git a/ZZZKBot/Source/ZZZKBotAIModule.cpp b/ZZZKBot/Source/ZZZKBotAIModule.cpp
+index 1da36dd..20a5636 100644
+--- a/ZZZKBot/Source/ZZZKBotAIModule.cpp
++++ b/ZZZKBot/Source/ZZZKBotAIModule.cpp
+@@ -29,6 +29,8 @@
+ #include "ZZZKBotAIModule.h"
+ #include <fstream>
+ #include <iomanip>
++#include <cstring>
++#include <ctime>
+ 
+ using namespace BWAPI;
+ using namespace Filter;
+@@ -118,8 +120,12 @@ void ZZZKBotAIModule::onEnd(bool isWinner)
+         std::time_t timer = std::time(nullptr);
+         oss << (timer - timerAtGameStart) << delim;
+         struct tm buf;
+-        memset(&buf, 0, sizeof(buf));
+-        errno_t errNo = localtime_s(&buf, &timer);
++        std::memset(&buf, 0, sizeof(buf));
++#ifdef _WIN32
++        const int errNo = localtime_s(&buf, &timer);
++#else
++        const int errNo = (localtime_r(&timer, &buf) != nullptr) ? 0 : 1;
++#endif
+         if (errNo == 0)
+         {
+             oss << std::put_time(&buf, "%Y-%m-%d");
+@@ -2665,7 +2671,16 @@ void ZZZKBotAIModule::onFrame()
+                 }
+ 
+                 oss << Broodwar->getInstanceNumber() << delim;
+-                oss << Broodwar->getRandomSeed() << delim;
++                // OpenBW's BWAPI fork throws std::runtime_error("ReplayHead_gameSeed_randSeed")
++                // from getRandomSeed(); the value is only logged here.
++                try
++                {
++                    oss << Broodwar->getRandomSeed() << delim;
++                }
++                catch (const std::exception &)
++                {
++                    oss << 0 << delim;
++                }
+                 oss << Broodwar->isMultiplayer() << delim;
+                 oss << Broodwar->isBattleNet() << delim;
+                 oss << Broodwar->isReplay() << delim;
+@@ -2715,8 +2730,12 @@ void ZZZKBotAIModule::onFrame()
+                 // Seconds since frame 0.
+                 oss << "0" << delim;
+                 struct tm buf;
+-                memset(&buf, 0, sizeof(buf));
+-                errno_t errNo = localtime_s(&buf, &timerAtGameStart);
++                std::memset(&buf, 0, sizeof(buf));
++#ifdef _WIN32
++                const int errNo = localtime_s(&buf, &timerAtGameStart);
++#else
++                const int errNo = (localtime_r(&timerAtGameStart, &buf) != nullptr) ? 0 : 1;
++#endif
+                 if (errNo == 0)
+                 {
+                     oss << std::put_time(&buf, "%Y-%m-%d");
+@@ -2860,8 +2879,12 @@ void ZZZKBotAIModule::onFrame()
+                 std::time_t timer = std::time(nullptr);
+                 oss << (timer - timerAtGameStart) << delim;
+                 struct tm buf;
+-                memset(&buf, 0, sizeof(buf));
+-                errno_t errNo = localtime_s(&buf, &timer);
++                std::memset(&buf, 0, sizeof(buf));
++#ifdef _WIN32
++                const int errNo = localtime_s(&buf, &timer);
++#else
++                const int errNo = (localtime_r(&timer, &buf) != nullptr) ? 0 : 1;
++#endif
+                 if (errNo == 0)
+                 {
+                     oss << std::put_time(&buf, "%Y-%m-%d");
+@@ -3118,8 +3141,8 @@ void ZZZKBotAIModule::onFrame()
+ 
+         if (u->getType() != BWAPI::UnitTypes::Zerg_Overlord)
+         {
+-            const int tmpX = (int) u->getClientInfo(scoutingTargetStartLocXInd);
+-            const int tmpY = (int) u->getClientInfo(scoutingTargetStartLocYInd);
++            const int tmpX = u->getClientInfo<int>(scoutingTargetStartLocXInd);
++            const int tmpY = u->getClientInfo<int>(scoutingTargetStartLocYInd);
+             if (tmpX != 0 || tmpY != 0)
+             {
+                 ++numNonOverlordUnitsTargetingStartLoc[TilePosition(tmpX, tmpY)];
+@@ -4289,9 +4312,9 @@ void ZZZKBotAIModule::onFrame()
+                     // If idle or were targeting an enemy unit or are no longer carrying minerals...
+                     const bool isNewCmdNeeded = u->isIdle() || (u->getTarget() && u->getTarget()->getPlayer() && u->getTarget()->getPlayer()->isEnemy(Broodwar->self()));
+                     if (isNewCmdNeeded ||
+-                        (!u->isCarryingMinerals() && (int) u->getClientInfo(wasJustCarryingMineralsInd) == wasJustCarryingMineralsTrueVal))
++                        (!u->isCarryingMinerals() && u->getClientInfo<int>(wasJustCarryingMineralsInd) == wasJustCarryingMineralsTrueVal))
+                     {
+-                        if (!u->isCarryingMinerals() && (int) u->getClientInfo(wasJustCarryingMineralsInd) == wasJustCarryingMineralsTrueVal)
++                        if (!u->isCarryingMinerals() && u->getClientInfo<int>(wasJustCarryingMineralsInd) == wasJustCarryingMineralsTrueVal)
+                         {
+                             // Reset indicator about carrying minerals because we aren't carrying minerals now.
+                             // Note: setClientInfo may also be called at the end of this and some other frames
+@@ -4301,7 +4324,7 @@ void ZZZKBotAIModule::onFrame()
+                             u->setClientInfo(Broodwar->getFrameCount(), frameLastReturnedMineralsInd);
+                         }
+ 
+-                        if (u != scoutingWorker || (int) u->getClientInfo(frameLastReturnedMineralsInd) == 0)
++                        if (u != scoutingWorker || u->getClientInfo<int>(frameLastReturnedMineralsInd) == 0)
+                         {
+                             // Order workers carrying a resource to return them to the center,
+                             // otherwise find a mineral patch to harvest.
+@@ -4331,7 +4354,7 @@ void ZZZKBotAIModule::onFrame()
+                 }
+             }
+ 
+-            if (u != scoutingWorker || (int) u->getClientInfo(frameLastReturnedMineralsInd) == 0)
++            if (u != scoutingWorker || u->getClientInfo<int>(frameLastReturnedMineralsInd) == 0)
+             {
+                 continue;
+             }
+@@ -4563,9 +4586,9 @@ void ZZZKBotAIModule::onFrame()
+                  u->canMove() &&
+                  !u->isFlying() &&
+                  !u->isAttacking() &&
+-                 (int) u->getClientInfo(frameLastStoppedInd) + (3 * 24) < Broodwar->getFrameCount() &&
+-                 (int) u->getClientInfo(frameLastAttackingInd) + std::max(Broodwar->self()->weaponDamageCooldown(u->getType()), u->getType().airWeapon().damageCooldown()) + (3 * 24) < Broodwar->getFrameCount() &&
+-                 (int) u->getClientInfo(frameLastChangedPosInd) > 0 && (int) u->getClientInfo(frameLastChangedPosInd) + (3 * 24) < Broodwar->getFrameCount() &&
++                 u->getClientInfo<int>(frameLastStoppedInd) + (3 * 24) < Broodwar->getFrameCount() &&
++                 u->getClientInfo<int>(frameLastAttackingInd) + std::max(Broodwar->self()->weaponDamageCooldown(u->getType()), u->getType().airWeapon().damageCooldown()) + (3 * 24) < Broodwar->getFrameCount() &&
++                 u->getClientInfo<int>(frameLastChangedPosInd) > 0 && u->getClientInfo<int>(frameLastChangedPosInd) + (3 * 24) < Broodwar->getFrameCount() &&
+                  noCmdPending(u))
+         {
+             u->stop();
+@@ -5018,8 +5041,8 @@ void ZZZKBotAIModule::onFrame()
+ 
+             if (targetStartLocs.empty() && !unscoutedOtherStartLocs.empty())
+             {
+-                const int tmpX = (int) u->getClientInfo(scoutingTargetStartLocXInd);
+-                const int tmpY = (int) u->getClientInfo(scoutingTargetStartLocYInd);
++                const int tmpX = u->getClientInfo<int>(scoutingTargetStartLocXInd);
++                const int tmpY = u->getClientInfo<int>(scoutingTargetStartLocYInd);
+                 if ((tmpX != 0 || tmpY != 0) &&
+                     unscoutedOtherStartLocs.find(TilePosition(tmpX, tmpY)) != unscoutedOtherStartLocs.end())
+                 {
+@@ -5063,8 +5086,8 @@ void ZZZKBotAIModule::onFrame()
+ 
+             if (targetPos == BWAPI::Positions::Unknown && targetStartLocs.empty())
+             {
+-                const int tmpX = (int) u->getClientInfo(scoutingTargetPosXInd);
+-                const int tmpY = (int) u->getClientInfo(scoutingTargetPosYInd);
++                const int tmpX = u->getClientInfo<int>(scoutingTargetPosXInd);
++                const int tmpY = u->getClientInfo<int>(scoutingTargetPosYInd);
+                 // If en-route to a position that isn't visible or isn't clear then continue going there.
+                 // Occasionally re-randomize late-game cos the unit may not have a path to get there.
+                 if ((tmpX != 0 || tmpY != 0) &&
+@@ -5265,8 +5288,8 @@ void ZZZKBotAIModule::onFrame()
+             if (targetPos == BWAPI::Positions::Unknown && targetStartLoc == BWAPI::TilePositions::Unknown && !unscoutedOtherStartLocs.empty() &&
+                 ((ss.isSpeedlingBO || ss.isHydraRushBO) || Broodwar->getFrameCount() < (5 * 60 * 24)))
+             {
+-                const int tmpX = (int) u->getClientInfo(scoutingTargetStartLocXInd);
+-                const int tmpY = (int) u->getClientInfo(scoutingTargetStartLocYInd);
++                const int tmpX = u->getClientInfo<int>(scoutingTargetStartLocXInd);
++                const int tmpY = u->getClientInfo<int>(scoutingTargetStartLocYInd);
+                 if ((tmpX != 0 || tmpY != 0) &&
+                     unscoutedOtherStartLocs.find(TilePosition(tmpX, tmpY)) != unscoutedOtherStartLocs.end())
+                 {
+@@ -5609,7 +5632,7 @@ void ZZZKBotAIModule::onFrame()
+         {
+             const int newX = u->getPosition().x;
+             const int newY = u->getPosition().y;
+-            if ((int) u->getClientInfo(posXInd) != newX || (int) u->getClientInfo(posYInd) != newY)
++            if (u->getClientInfo<int>(posXInd) != newX || u->getClientInfo<int>(posYInd) != newY)
+             {
+                 u->setClientInfo(Broodwar->getFrameCount(), frameLastChangedPosInd);
+             }
+@@ -5637,14 +5660,14 @@ void ZZZKBotAIModule::onFrame()
+                 u->setClientInfo(wasJustCarryingMineralsTrueVal, wasJustCarryingMineralsInd);
+             }
+ 
+-            if (u->getGroundWeaponCooldown() > (int) u->getClientInfo(lastGroundWeaponCooldownInd))
++            if (u->getGroundWeaponCooldown() > u->getClientInfo<int>(lastGroundWeaponCooldownInd))
+             {
+                 u->setClientInfo(u->getGroundWeaponCooldown(), lastPeakGroundWeaponCooldownInd);
+                 u->setClientInfo(Broodwar->getFrameCount(), lastPeakGroundWeaponCooldownFrameInd);
+             }
+             u->setClientInfo(u->getGroundWeaponCooldown(), lastGroundWeaponCooldownInd);
+ 
+-            if (u->getAirWeaponCooldown() > (int) u->getClientInfo(lastAirWeaponCooldownInd))
++            if (u->getAirWeaponCooldown() > u->getClientInfo<int>(lastAirWeaponCooldownInd))
+             {
+                 u->setClientInfo(u->getAirWeaponCooldown(), lastPeakAirWeaponCooldownInd);
+                 u->setClientInfo(Broodwar->getFrameCount(), lastPeakAirWeaponCooldownFrameInd);
+@@ -5707,8 +5730,12 @@ void ZZZKBotAIModule::onPlayerLeft(BWAPI::Player player)
+         std::time_t timer = std::time(nullptr);
+         oss << (timer - timerAtGameStart) << delim;
+         struct tm buf;
+-        memset(&buf, 0, sizeof(buf));
+-        errno_t errNo = localtime_s(&buf, &timer);
++        std::memset(&buf, 0, sizeof(buf));
++#ifdef _WIN32
++        const int errNo = localtime_s(&buf, &timer);
++#else
++        const int errNo = (localtime_r(&timer, &buf) != nullptr) ? 0 : 1;
++#endif
+         if (errNo == 0)
+         {
+             oss << std::put_time(&buf, "%Y-%m-%d");

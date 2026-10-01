@@ -72,6 +72,8 @@ def make_backend(kind: str, cfg: SidecarConfig, recorded_log: str | None = None)
         return ClaudeCliBackend(model=cfg.models.strategy_model)
     if kind == "recorded":
         return RecordedBackend(Path(recorded_log))
+    if kind == "observe":
+        return FakeBackend(observe_only=True)
     return FakeBackend()
 
 
@@ -129,7 +131,7 @@ def main() -> None:
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
-    ap.add_argument("--llm", default=None, choices=["anthropic", "claude-cli", "fake", "recorded"])
+    ap.add_argument("--llm", default=None, choices=["anthropic", "claude-cli", "fake", "observe", "recorded"])
     ap.add_argument("--recorded-log", default=None)
     ap.add_argument("--mode", default=None)
     ap.add_argument("--port", type=int, default=None)

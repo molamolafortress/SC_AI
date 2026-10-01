@@ -41,6 +41,12 @@ def run_mock(cfg: SidecarConfig, games: int, seed: int, strategy: str) -> None:
 OPPONENTS = {  # name -> (module .so, race). Extend as more bots are ported to OpenBW.
     "probe": ("body/sidecar_client/probe_module/build/SidecarProbeModule.so", "Terran"),  # idle; pipeline check only
     "mcrave": ("build/mcrave/McRave.so", "Zerg"),  # pristine McRave as opponent = our own baseline body
+    "zzzkbot": ("build/zzzkbot/ZZZKBot.so", "Zerg"),  # 4-pool/speedling rush bot (body/zzzkbot_port)
+    "ualbertabot": ("build/ualbertabot/UAlbertaBot.so", "Protoss"),  # any race; strategy picked by race from its config (body/ualbertabot_port)
+}
+# Opponents that need files under p2/bwapi-data/ (copied in by tools/run_game_openbw.sh via OPP_DATA_DIR).
+OPPONENT_DATA_DIRS = {
+    "ualbertabot": "body/ualbertabot_port/bwapi-data",  # AI/UAlbertaBot_Config.txt
 }
 
 
@@ -61,7 +67,7 @@ def run_openbw(cfg: SidecarConfig, args, out_dir: Path) -> None:
             raise SystemExit(f"module not found: {p}")
     port = 8770 + (args.seed % 100)
     env = dict(os.environ, SIDECAR_CONFIG=args.config, SIDECAR_LOGS_DIR=str(cfg.logs_dir))
-    backend = (args.llm or cfg.llm_backend) if args.strategy == "llm" else "fake"
+    backend = (args.llm or cfg.llm_backend) if args.strategy == "llm" else "observe"
     if args.strategy == "llm" and backend == "fake":
         backend = "claude-cli"
     sidecar = subprocess.Popen([sys.executable, "-m", "bot.sidecar.server", "--config", args.config, "--llm", backend,
@@ -69,9 +75,12 @@ def run_openbw(cfg: SidecarConfig, args, out_dir: Path) -> None:
                                env=env, stdout=open(out_dir / "sidecar.out", "w"), stderr=subprocess.STDOUT)
     try:
         time.sleep(2)
-        game_env = dict(os.environ, SIDECAR_HOST="127.0.0.1", SIDECAR_PORT=str(port), SIDECAR_CONFIG=args.config)
+        game_env = dict(os.environ, SIDECAR_HOST="127.0.0.1", SIDECAR_PORT=str(port), SIDECAR_CONFIG=args.config,
+                        SC_AI_MAX_FRAMES=str(args.max_frames))
         # the sidecar writes logs to cfg.logs_dir; tell it via the config override used by SidecarConfig.load
         game_env["SIDECAR_LOGS_DIR"] = str(cfg.logs_dir)
+        if args.opponent in OPPONENT_DATA_DIRS:
+            game_env["OPP_DATA_DIR"] = str(Path(OPPONENT_DATA_DIRS[args.opponent]).resolve())
 
         def one(i: int) -> str:
             run_dir = out_dir / "games" / f"{i:03d}"
@@ -98,6 +107,7 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--config", default="config/sidecar.yaml")
     ap.add_argument("--parallel", type=int, default=1)
+    ap.add_argument("--max-frames", type=int, default=43200, help="frame cap per game (30 game-minutes); leaving counts as timeout")
     ap.add_argument("--llm", default=None, choices=["anthropic", "claude-cli", "fake", "recorded"], help="backend for --strategy llm")
     ap.add_argument("--our-module", default="build/mcrave/McRave.so")
     args = ap.parse_args()

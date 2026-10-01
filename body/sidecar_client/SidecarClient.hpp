@@ -33,6 +33,7 @@ struct Directive {
     int issued_frame = 0;
     int expires_frame = 0;
     bool keep_current_plan = false;
+    bool observe_only = false;   // true: log/measure only, never override the body
     std::string opening;
     std::map<std::string, double> unit_mix_target;
     std::vector<std::string> tech_priority;
@@ -55,6 +56,7 @@ struct Directive {
         d.issued_frame = j.value("issued_frame", 0);
         d.expires_frame = j.value("expires_frame", 0);
         d.keep_current_plan = j.value("keep_current_plan", false);
+        d.observe_only = j.value("observe_only", false);
         d.opening = j.value("opening", "");
         if (j.contains("unit_mix_target")) d.unit_mix_target = j["unit_mix_target"].get<std::map<std::string, double>>();
         if (j.contains("tech_priority")) d.tech_priority = j["tech_priority"].get<std::vector<std::string>>();
@@ -111,12 +113,14 @@ public:
     int postsSent() const { return posts_.load(); }
     int postsFailed() const { return failed_.load(); }
 
-    void onEnd(bool isWinner) {
+    void onEnd(bool isWinner) { onEnd(isWinner ? "win" : "loss"); }
+
+    void onEnd(const std::string& result) {
         stop();
         httplib::Client cli(host_, port_);
         cli.set_connection_timeout(0, timeoutMs_ * 1000);
         cli.set_read_timeout(timeoutMs_ / 1000 + 1, 0);
-        nlohmann::json body = {{"result", isWinner ? "win" : "loss"}, {"frame", BWAPI::Broodwar->getFrameCount()}};
+        nlohmann::json body = {{"result", result}, {"frame", BWAPI::Broodwar->getFrameCount()}};
         cli.Post("/game/end?game_id=" + gameId_, body.dump(), "application/json");
     }
 

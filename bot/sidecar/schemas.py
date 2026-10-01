@@ -85,6 +85,7 @@ class Directive(BaseModel):
     """Strategy LLM output. Macro policy only: no coordinates, no unit ids."""
 
     keep_current_plan: bool = False
+    observe_only: bool = False  # true: sidecar logs and measures, body keeps its own defaults
     change_reason: str = ""
     opening: str = ""
     unit_mix_target: dict[str, float] = Field(default_factory=dict)

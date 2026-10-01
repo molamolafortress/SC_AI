@@ -30,10 +30,11 @@ def collect(logs_dir: Path) -> list[dict]:
 def summarize(results: list[dict]) -> dict:
     n = len(results)
     wins = sum(1 for r in results if r.get("result") == "win")
+    timeouts = sum(1 for r in results if r.get("result") == "timeout")
     p, lo, hi = wilson(wins, n)
     mean = lambda key: (sum(float(r.get(key, 0) or 0) for r in results) / n) if n else 0.0
     return {
-        "games": n, "wins": wins, "win_rate": round(p, 3), "win_rate_ci95": [round(lo, 3), round(hi, 3)],
+        "games": n, "wins": wins, "timeouts": timeouts, "win_rate": round(p, 3), "win_rate_ci95": [round(lo, 3), round(hi, 3)],
         "avg_frames": round(mean("frames")), "avg_cost_usd": round(mean("cost_usd"), 3),
         "avg_strategy_calls": round(mean("strategy_calls"), 1), "avg_flip_flops": round(mean("flip_flops"), 2),
         "avg_validator_rejects": round(mean("validator_rejects"), 2),

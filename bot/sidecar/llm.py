@@ -91,8 +91,9 @@ class LLMRejected(RuntimeError):
 class FakeBackend:
     """Deterministic stand-in: rule-based directive from the user message. Zero cost."""
 
-    def __init__(self, latency_ms: float = 0.0, script: list[Directive] | None = None):
+    def __init__(self, latency_ms: float = 0.0, script: list[Directive] | None = None, observe_only: bool = False):
         self.latency_ms = latency_ms
+        self.observe_only = observe_only
         self.script = list(script or [])
         self.calls: list[tuple[str, str, str]] = []
 
@@ -102,6 +103,8 @@ class FakeBackend:
             time.sleep(self.latency_ms / 1000)
         if self.script:
             d = self.script.pop(0)
+        elif self.observe_only:
+            d = Directive(observe_only=True, keep_current_plan=True, change_reason="observe only: body defaults", stance="neutral")
         else:
             aggressive = "barracks x2" in user_message or "gateway x2" in user_message
             d = Directive(
