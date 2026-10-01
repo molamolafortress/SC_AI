@@ -69,7 +69,7 @@ def run_openbw(cfg: SidecarConfig, args, out_dir: Path) -> None:
         if not p.exists():
             raise SystemExit(f"module not found: {p}")
     port = 8770 + (args.seed % 100)
-    env = dict(os.environ, SIDECAR_CONFIG=args.config, SIDECAR_LOGS_DIR=str(cfg.logs_dir))
+    env = dict(os.environ, SIDECAR_CONFIG=args.config, SIDECAR_LOGS_DIR=str(cfg.logs_dir), SIDECAR_DISABLED_LEVERS=args.disable_levers or "")
     backend = (args.llm or cfg.llm_backend) if args.strategy == "llm" else "observe"
     sidecar = subprocess.Popen([sys.executable, "-m", "bot.sidecar.server", "--config", args.config, "--llm", backend,
                                 "--port", str(port), "--mode", "lockstep" if args.lockstep else "headless"],
@@ -115,12 +115,13 @@ def main() -> None:
     ap.add_argument("--lockstep", dest="lockstep", action="store_true", default=True,
                     help="game waits for each LLM call (decision lands on the frame it was asked for); default on")
     ap.add_argument("--no-lockstep", dest="lockstep", action="store_false")
+    ap.add_argument("--disable-levers", default="", help="comma list of directive levers reset to no-override (ablation)")
     ap.add_argument("--max-frames", type=int, default=43200, help="frame cap per game (30 game-minutes); leaving counts as timeout")
     ap.add_argument("--llm", default=None, choices=["anthropic", "claude-cli", "fake", "recorded"], help="backend for --strategy llm")
     ap.add_argument("--our-module", default="build/mcrave/McRave.so")
     args = ap.parse_args()
 
-    run_id = f"{time.strftime('%Y%m%d_%H%M%S')}_{args.runner}_{args.opponent}_{args.strategy}_s{args.seed}"
+    run_id = f"{time.strftime('%Y%m%d_%H%M%S')}_{args.runner}_{args.opponent}_{args.strategy}{('_no-' + args.disable_levers.replace(',', '-')) if args.disable_levers else ''}_s{args.seed}"
     out_dir = Path("eval/results") / run_id
     cfg = SidecarConfig.load(args.config, logs_dir=out_dir / "logs", mode="lockstep" if args.lockstep else "headless")
     if args.runner == "openbw":

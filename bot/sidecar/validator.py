@@ -81,3 +81,28 @@ def validate(d: Directive, knowledge: Knowledge, state: StateSummary | None) -> 
         d.stance = "aggressive"
 
     return ValidationResult(d, ok=not rejected, fixes=fixes, rejected=rejected)
+
+
+def apply_disabled_levers(d: Directive, disabled: tuple, state: StateSummary | None) -> Directive:
+    """Reset disabled directive fields to their 'no override' value (lever ablation experiments)."""
+    if not disabled:
+        return d
+    d = d.model_copy(deep=True)
+    body = (state.body_defaults if state else {}) or {}
+    if "opening" in disabled:
+        d.opening = ""
+    if "unit_mix" in disabled:
+        d.unit_mix_target = {}
+    if "tech_priority" in disabled:
+        d.tech_priority = []
+    if "stance" in disabled:
+        d.stance = "neutral"
+    if "objective" in disabled:
+        d.army_objective = d.army_objective.model_copy(update={"type": "defend", "location": "natural"})
+    if "expand_policy" in disabled:
+        d.expand_policy = "allow_when_safe"
+    if "static_defense" in disabled:
+        d.static_defense = {}
+    if "wall" in disabled:
+        d.wall_natural = body.get("wall_natural", "none") or "none"
+    return d

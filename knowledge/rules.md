@@ -21,3 +21,12 @@
 - Drones first unless a threat is scouted; 2 hatch before pool is greedy, 3 hatch needs safety.
 - Change plan only on new information (new enemy building, lost engagement, tech spotted). Repeated flip-flops lose games.
 - Never request wall/positions that the map knowledge does not define.
+
+## Economy and static defense (learned from the first A/B, 2026-10-01)
+- A sunken or spore colony consumes a drone (plus 50 minerals / 75 minerals). Every static defense request is one fewer worker.
+- In ZvZ muta wars the mutalisk count and drone count decide the game; static defense only buys time. Request a spore only
+  when enemy mutas are confirmed or a spire is seen finishing before ours, and keep it to 1 unless you are already behind.
+- Do not keep stance=defensive for the whole game. Defensive holds the entire army at home; use it for a specific window
+  (expected timing push) and return to neutral afterwards so the body can trade and expand.
+- expand_policy=never is for an all-in or an imminent attack only. Repeated "never" starves the economy.
+- When the execution report shows a request was not applied (e.g. unit_mix drones ignored), do not repeat it; change the lever.

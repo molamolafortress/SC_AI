@@ -1,9 +1,9 @@
 diff --git a/Source/McRave/Main/Sidecar.cpp b/Source/McRave/Main/Sidecar.cpp
 new file mode 100644
-index 0000000..2e13f51
+index 0000000..45c5efa
 --- /dev/null
 +++ b/Source/McRave/Main/Sidecar.cpp
-@@ -0,0 +1,1372 @@
+@@ -0,0 +1,1373 @@
 +// Sidecar: SC_AI hooks 1-3 for McRave. See Sidecar.h and body/mcrave_port/HOOKS_IMPL.md.
 +//
 +// The heavy headers (cpp-httplib, nlohmann/json) are confined to this translation unit. They are included before
@@ -488,7 +488,8 @@ index 0000000..2e13f51
 +            Position pos;
 +        };
 +        deque<Loss> lossWindow;
-+        const int lossWindowFrames = 240, engagementThreshold = 150, engagementQuietFrames = 120;
++        static const int engagementThreshold = [] { const char* v = std::getenv("SC_AI_ENGAGE_THRESHOLD"); return v ? std::atoi(v) : 400; }();
++        const int lossWindowFrames = 240, engagementQuietFrames = 120;
 +        bool inEngagement = false;
 +        int engagementStart = 0, lastLossFrame = 0, engMyValue = 0, engEnemyValue = 0, engN = 0;
 +        long long engX = 0, engY = 0;

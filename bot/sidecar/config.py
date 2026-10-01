@@ -23,7 +23,8 @@ class Triggers:
     big_engagement_loss_value: int = 200
     min_hold_seconds: int = 20
     min_call_gap_seconds: int = 20      # debounce: non-critical triggers wait this long after the previous call
-    critical_triggers: tuple = ("engagement_end", "cloaked", "game_start")
+    critical_triggers: tuple = ("cloaked", "game_start")
+    engagement_min_gap_seconds: int = 60   # at most one engagement-driven call per minute
     # Start rule (audit item D): at game_start the body keeps its own defaults (observe-only directive) and the
     # first real LLM call happens at the first intel/enemy trigger, or at first_call_deadline_seconds if nothing
     # was scouted by then. decide_at_start: true restores the old behaviour (LLM call at frame 0).
@@ -31,6 +32,12 @@ class Triggers:
     first_call_deadline_seconds: int = 120
     series_interval_seconds: int = 30   # time-series sampling interval (## 시계열 section)
     series_max_rows: int = 40
+
+
+@dataclass
+class Levers:
+    """Which directive fields may override the body. Disabled levers are reset to "no override" before issuing."""
+    disabled: tuple = ()   # any of: opening, unit_mix, tech_priority, stance, objective, expand_policy, static_defense, wall
 
 
 @dataclass
@@ -55,6 +62,7 @@ class SidecarConfig:
     budgets: Budgets = field(default_factory=Budgets)
     triggers: Triggers = field(default_factory=Triggers)
     models: ModelConfig = field(default_factory=ModelConfig)
+    levers: Levers = field(default_factory=Levers)
 
     @classmethod
     def load(cls, path: str | Path | None = None, **overrides) -> "SidecarConfig":
@@ -69,8 +77,12 @@ class SidecarConfig:
                     cfg.triggers = Triggers(**value)
                 elif key == "models":
                     cfg.models = ModelConfig(**value)
+                elif key == "levers":
+                    cfg.levers = Levers(disabled=tuple(value.get("disabled", ())))
                 elif hasattr(cfg, key):
                     setattr(cfg, key, Path(value) if key.endswith("_dir") else value)
+        if os.environ.get("SIDECAR_DISABLED_LEVERS"):
+            cfg.levers = Levers(disabled=tuple(x for x in os.environ["SIDECAR_DISABLED_LEVERS"].split(",") if x))
         if os.environ.get("SIDECAR_LOGS_DIR"):
             cfg.logs_dir = Path(os.environ["SIDECAR_LOGS_DIR"])
         for key, value in overrides.items():

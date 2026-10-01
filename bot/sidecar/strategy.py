@@ -14,7 +14,7 @@ from .plan_ledger import PlanLedger
 from .schemas import Directive, IssuedDirective, StateSummary
 from .state_store import StateStore
 from .summarizer import fixed_prefix, user_message
-from .validator import validate
+from .validator import apply_disabled_levers, validate
 
 
 @dataclass
@@ -56,6 +56,8 @@ class StrategyCaller:
         # Debounce: a burst of intel/building events within min_call_gap_seconds is answered by one call (events stay
         # pending and ride along in the delta); only critical triggers bypass the gap.
         gap = self.cfg.frames(self.cfg.triggers.min_call_gap_seconds)
+        if trigger.startswith("engagement_end"):
+            gap = max(gap, self.cfg.frames(self.cfg.triggers.engagement_min_gap_seconds))
         if (not trigger.startswith(tuple(self.cfg.triggers.critical_triggers))
                 and self.store.latest.frame - self.store.last_call_frame < gap):
             return
@@ -119,6 +121,7 @@ class StrategyCaller:
         if any(ev.startswith("engagement_start") for ev in self.store.pending_events):
             self.logger.log("strategy", latest.frame, outcome="discarded_stale", trigger=trigger)
             return
+        d = apply_disabled_levers(d, self.cfg.levers.disabled, latest)
         v = validate(d, self.knowledge, latest)
         if not v.ok:
             self.logger.validator_rejects += 1
