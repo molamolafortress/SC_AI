@@ -1,9 +1,9 @@
 diff --git a/Source/McRave/Main/Sidecar.cpp b/Source/McRave/Main/Sidecar.cpp
 new file mode 100644
-index 0000000..884cfeb
+index 0000000..2e13f51
 --- /dev/null
 +++ b/Source/McRave/Main/Sidecar.cpp
-@@ -0,0 +1,1328 @@
+@@ -0,0 +1,1372 @@
 +// Sidecar: SC_AI hooks 1-3 for McRave. See Sidecar.h and body/mcrave_port/HOOKS_IMPL.md.
 +//
 +// The heavy headers (cpp-httplib, nlohmann/json) are confined to this translation unit. They are included before
@@ -980,6 +980,44 @@ index 0000000..884cfeb
 +        }
 +    }
 +
++    static string gameTimeString(int frame)
++    {
++        const int secs = frame * 42 / 1000;
++        char buf[16]; std::snprintf(buf, sizeof buf, "%d:%02d", secs / 60, secs % 60);
++        return buf;
++    }
++
++    void writeUnitSnapshot(const string &path)
++    {
++        static std::ofstream out;
++        if (!out.is_open()) out.open(path, std::ios::app);
++        if (!out) return;
++        const int frame = Broodwar->getFrameCount();
++        nlohmann::json units = nlohmann::json::array();
++        auto add = [&](BWAPI::Unit u, const char *side) {
++            if (!u || !u->exists()) return;
++            nlohmann::json j = {
++                {"id", u->getID()}, {"side", side}, {"type", u->getType().getName()},
++                {"x", u->getPosition().x}, {"y", u->getPosition().y},
++                {"hp", u->getHitPoints()}, {"sh", u->getShields()}, {"en", u->getEnergy()},
++                {"order", u->getOrder().getName()},
++            };
++            if (u->getTarget()) j["target"] = u->getTarget()->getID();
++            else if (u->getOrderTarget()) j["target"] = u->getOrderTarget()->getID();
++            if (u->getType().isBuilding() && !u->isCompleted()) j["build_left"] = u->getRemainingBuildTime();
++            if (u->isCloaked() || u->isBurrowed()) j["cloaked"] = true;
++            if (u->getType().isWorker() && u->isGatheringMinerals()) j["mining"] = true;
++            units.push_back(std::move(j));
++        };
++        for (auto u : Broodwar->self()->getUnits()) add(u, "me");
++        for (auto u : Broodwar->enemy()->getUnits()) add(u, "enemy");
++        nlohmann::json line = {{"frame", frame}, {"t", gameTimeString(frame)}, {"minerals", Broodwar->self()->minerals()},
++                               {"gas", Broodwar->self()->gas()}, {"supply", {Broodwar->self()->supplyUsed() / 2, Broodwar->self()->supplyTotal() / 2}},
++                               {"units", units}};
++        out << line.dump() << '\n';
++        if (frame % 240 == 0) out.flush();
++    }
++
 +    void emitIfDue()
 +    {
 +        // Item E: SC_AI_MAP_DUMP=<path>: dump BWEM/BWEB map knowledge on the first frame (all managers initialised) and leave.
@@ -992,6 +1030,12 @@ index 0000000..884cfeb
 +            Broodwar->leaveGame();
 +            return;
 +        }
++        // Unit snapshots (SC_AI_UNIT_SNAPSHOTS=<file>): every 24 frames, one JSON line with every own unit and every
++        // visible enemy unit (id, type, player, tile/pixel pos, hp, shields, energy, order, target). Offline/training data;
++        // never sent to the LLM in-game. Independent of the sidecar being enabled.
++        static const string snapPath = [] { const char *v = std::getenv("SC_AI_UNIT_SNAPSHOTS"); return v ? string(v) : string(); }();
++        if (!snapPath.empty() && Broodwar->getFrameCount() % 24 == 0)
++            writeUnitSnapshot(snapPath);
 +        if (!enabled())
 +            return;
 +        meterCommands();
