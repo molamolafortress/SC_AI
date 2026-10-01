@@ -118,8 +118,20 @@ class FakeBackend:
                 static_defense={"sunken": 1 if aggressive else 0},
                 confidence=0.6,
                 review_after_seconds=45,
+                enemy_build_guess=_fake_build_guess(user_message),
+                expected_threats=["marine push 4:30-5:30"] if aggressive else [],
+                our_response="1 sunken + lings, then drones" if aggressive else "drone up, scout again",
             )
         return LLMResult(d, self.latency_ms, {"input_tokens": 0, "output_tokens": 0}, 0.0)
+
+
+def _fake_build_guess(user_message: str) -> str:
+    """Echo McRave's guess from the intel brief, so the fake directive is traceable to its input."""
+    marker = "McRave 추정: "
+    i = user_message.find(marker)
+    if i < 0:
+        return "unknown"
+    return user_message[i + len(marker):].split("\n", 1)[0][:120]
 
 
 class RecordedBackend:

@@ -1,0 +1,74 @@
+{
+  "matchup": "ZvZ",
+  "openings": {
+    "9pool_speed": {
+      "summary": "Pool at 9, gas, ling speed. Standard ZvZ opener: lings ~1:55, speed ~3:30. Beats 12 hatch, trades evenly with overpool.",
+      "risk": "12 pool muta timing if lings do nothing"
+    },
+    "overpool": {
+      "summary": "Overlord at 9, pool, hatch after. Balanced: lings ~2:15 with better economy than 9 pool.",
+      "risk": "9 pool speed if lings are not kept home"
+    },
+    "12pool": {
+      "summary": "Pool at 12 after overlord, gas, lair. Economic ZvZ into fast mutalisk.",
+      "risk": "9 pool / 4 pool"
+    },
+    "12hatch_11pool": {
+      "summary": "Hatch first. Greedy in ZvZ: only vs a scouted slow pool or when the enemy drone-scouts late.",
+      "risk": "9 pool and anything faster loses the hatch"
+    },
+    "2hatch_muta": {
+      "summary": "Mid-game transition: 2 hatch, lair, spire, mutalisk + scourge. The standard ZvZ mid game.",
+      "requires": [
+        "lair",
+        "spire"
+      ]
+    },
+    "3hatch_muta": {
+      "summary": "Mid-game transition: 3 hatch before spire. Only when the enemy is slower to spire or lings are contained.",
+      "requires": [
+        "lair",
+        "spire"
+      ]
+    },
+    "3hatch_hydra": {
+      "summary": "Mid-game transition: hydra den for anti-muta. Rare in ZvZ; vs mass muta with spores.",
+      "requires": [
+        "hydralisk_den"
+      ]
+    },
+    "lurker_contain": {
+      "summary": "Lurker timing vs a ling-heavy enemy with no spire. Rare.",
+      "requires": [
+        "lurker_aspect"
+      ]
+    }
+  },
+  "counters": {
+    "early_lings": [
+      "zergling",
+      "sunken_colony",
+      "drone pull"
+    ],
+    "mutalisk": [
+      "scourge",
+      "mutalisk",
+      "spore_colony"
+    ],
+    "mass_zergling": [
+      "sunken_colony",
+      "zergling",
+      "mutalisk"
+    ]
+  },
+  "reference_timings": {
+    "spawning_pool": "9 pool 1:00-1:05 (lings 1:55); overpool 1:20 (lings 2:15); 12 pool 1:45 (lings 2:40); 4 pool 0:30",
+    "extractor": "9 pool speed 1:15-1:30; 12 pool 1:50; no gas by 2:30 = ling flood or hatch-first economy",
+    "hatchery": "12 hatch 1:30-1:45 (2nd); 9 hatch 1:15; 2nd hatch after pool 2:15-2:45",
+    "lair": "3:00-3:30 = muta ~5:30-6:00; lair at 2:40 = 1-hatch muta ~5:00",
+    "spire": "4:15-4:45 (mutas +2:00 after start)",
+    "sunken_colony": "2:30-3:30 = defensive, expect fewer lings",
+    "evolution_chamber": "4:00+ = spores / carapace",
+    "hydralisk_den": "unusual in ZvZ: hydra vs muta"
+  }
+}

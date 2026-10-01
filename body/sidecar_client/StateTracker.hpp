@@ -14,7 +14,7 @@
 class StateTracker {
 public:
     struct SeenBuilding { int count = 0; int firstFrame = 0; };
-    struct SeenUnit { int count = 0; int lastFrame = 0; };
+    struct SeenUnit { int count = 0; int lastFrame = 0; int firstFrame = -1; };
 
     // Call every frame.
     void update() {
@@ -34,7 +34,9 @@ public:
                 }
             } else {
                 unitNow[name]++;
-                units_[name].lastFrame = frame;
+                auto& su = units_[name];
+                su.lastFrame = frame;
+                if (su.firstFrame < 0) su.firstFrame = frame;
             }
             if ((u->isCloaked() || u->isBurrowed() || type.hasPermanentCloak()) && !u->isDetected()) {
                 cloaked_.push_back({{"type", name}, {"x", u->getPosition().x}, {"y", u->getPosition().y},
@@ -63,6 +65,13 @@ public:
     nlohmann::json combatSim = nlohmann::json::object();
     nlohmann::json bodyDefaults = nlohmann::json::object();
     nlohmann::json metrics = nlohmann::json::object();
+    // Intel brief (scouting intelligence organised for the Strategy LLM), filled by the body every emit. See Sidecar::fillIntel().
+    nlohmann::json intel = nlohmann::json::object();
+
+    // Read-only views for the body's intel assembly.
+    const std::map<std::string, SeenBuilding>& buildingsSeen() const { return buildings_; }
+    const std::map<std::string, SeenUnit>& unitsSeen() const { return units_; }
+    int expansionsSeen() const { return expansions(); }
 
     nlohmann::json toStateSummary(const std::string& gameId, const std::string& directiveId) {
         auto& bw = BWAPI::Broodwar;
@@ -118,6 +127,7 @@ public:
             {"execution", {{"directive_id", directiveId.empty() ? nlohmann::json(nullptr) : nlohmann::json(directiveId)}, {"goals", nlohmann::json::array()}}},
             {"body_defaults", bodyDefaults},
             {"metrics", metrics},
+            {"intel", intel},
         };
     }
 

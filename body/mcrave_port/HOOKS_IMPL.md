@@ -56,6 +56,18 @@ id/stance/expand/expiry is drawn at screen (432,46), next to McRave's build line
 `body_defaults`: `build`, `opener`, `transition`, `opening` (`B/O/T`), `stance`
 (`all_in|aggressive|defensive` from McRave's rush/pressure flags), `expand`, `wall_natural`,
 `in_opening`, `enemy_build/opener/transition` (Spy). All strings, matching `StateSummary.body_defaults: dict[str,str]`.
+`intel` (`Sidecar::fillIntel()`, same cadence, `StateSummary.intel` / `schemas.Intel`): the scouting brief for the
+Strategy LLM. `enemy_build/opener/transition` + `*_state` (`unknown|possible|likely`, from Spy's name and
+likely-time), `flags` (Spy `likely` strats: expand, rush, proxy, possible_proxy, gas_steal, pressure, wall, greedy,
+invis, detection, turtle, fortress), `mirror` (ZvZ pool/speed vs ours, `terran_style`), `workers_pulled`,
+`buildings{name: count, first_seen_frame, started_frame/time, completes_frame/time}` (start/complete are McRave's
+`UnitInfo::frameStartedWhen/CompletesWhen` health-based estimates, the same numbers Spy logs as "starts at", merged
+across frames so destroyed buildings keep their timings), `workers_seen_max`, `gas{count, first_seen_*}`,
+`expansions` (max of `Stations` enemy stations and seen town halls), `scout{enemy_main_found, main/natural_scouted_*
+(first frame `Stations::isBaseExplored`), full_scout, scout_denied, main/natural_last_seen_frame (`Stations::lastVisible`)}`,
+`army{first_seen_*, max_by_type}`. Spy's `enemy*Time()` accessors are declared but not defined upstream and are not used.
+`resolveOpening()` also accepts McRave native names (`PoolHatch/12Pool/2HatchMuta`, `2HatchMuta`, `HatchPool/12Hatch`),
+matched per '/'-part against `Learning::getBuilds()`.
 
 ## Hook 1: strategy injection, exact insertion points
 

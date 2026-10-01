@@ -29,6 +29,11 @@ class Knowledge:
         return set(self.builds.get("openings", {}).keys())
 
     @property
+    def reference_timings(self) -> dict[str, str]:
+        """Enemy building -> typical start time text (builds/<matchup>.json 'reference_timings'), for the intel brief."""
+        return dict(self.builds.get("reference_timings", {}))
+
+    @property
     def wall_names(self) -> set[str]:
         return {"none", *self.map_knowledge.get("walls", {}).keys()}
 

@@ -1,16 +1,77 @@
 {
   "matchup": "ZvT",
   "openings": {
-    "12hatch_11pool": {"summary": "Economic. Hatch at 12, pool at 11, gas after. Safe vs 1-rax expand.", "risk": "8-rax, proxy"},
-    "9pool_speed": {"summary": "Early lings + speed. Good vs greedy Terran, weak economy.", "risk": "wall + bunker"},
-    "overpool": {"summary": "Pool at 9 after overlord, hatch after. Balanced safety/economy.", "risk": "none major"},
-    "3hatch_muta": {"summary": "Mid-game transition: 3 hatch, lair, spire, mutalisk harass.", "requires": ["lair", "spire"]},
-    "3hatch_hydra": {"summary": "Mid-game transition: hydra den, range/speed, hydra timing.", "requires": ["hydralisk_den"]},
-    "lurker_contain": {"summary": "Lurkers at Terran natural to buy time for 3rd/4th.", "requires": ["lurker_aspect"]}
+    "12hatch_11pool": {
+      "summary": "Economic. Hatch at 12, pool at 11, gas after. Safe vs 1-rax expand.",
+      "risk": "8-rax, proxy"
+    },
+    "9pool_speed": {
+      "summary": "Early lings + speed. Good vs greedy Terran, weak economy.",
+      "risk": "wall + bunker"
+    },
+    "overpool": {
+      "summary": "Pool at 9 after overlord, hatch after. Balanced safety/economy.",
+      "risk": "none major"
+    },
+    "3hatch_muta": {
+      "summary": "Mid-game transition: 3 hatch, lair, spire, mutalisk harass.",
+      "requires": [
+        "lair",
+        "spire"
+      ]
+    },
+    "3hatch_hydra": {
+      "summary": "Mid-game transition: hydra den, range/speed, hydra timing.",
+      "requires": [
+        "hydralisk_den"
+      ]
+    },
+    "lurker_contain": {
+      "summary": "Lurkers at Terran natural to buy time for 3rd/4th.",
+      "requires": [
+        "lurker_aspect"
+      ]
+    },
+    "12pool": {
+      "summary": "Pool at 12 after overlord, hatch after. Safe, slightly less economic than 12 hatch.",
+      "risk": "none major"
+    },
+    "2hatch_muta": {
+      "summary": "Mid-game transition: 2 hatch, fast lair/spire, early mutalisk.",
+      "requires": [
+        "lair",
+        "spire"
+      ]
+    }
   },
   "counters": {
-    "marine_medic_bio": ["lurker", "zergling", "defiler"],
-    "mech_tank_vulture": ["mutalisk", "guardian", "zergling flank", "ultralisk late"],
-    "wraith": ["hydralisk", "spore_colony", "scourge"]
+    "marine_medic_bio": [
+      "lurker",
+      "zergling",
+      "defiler"
+    ],
+    "mech_tank_vulture": [
+      "mutalisk",
+      "guardian",
+      "zergling flank",
+      "ultralisk late"
+    ],
+    "wraith": [
+      "hydralisk",
+      "spore_colony",
+      "scourge"
+    ]
+  },
+  "reference_timings": {
+    "barracks": "1:10-1:20 (1-rax); 2nd barracks by 1:50 = 2-rax",
+    "refinery": "1:30-2:00; no gas by 2:30 = 2-rax marine push",
+    "supply_depot": "0:50",
+    "command_center": "2nd CC 2:30-3:00 = 1-rax expand / CC first <1:30",
+    "factory": "2:45-3:15 (rax-fact); vultures/tanks 4:00+",
+    "academy": "3:00-3:30 = bio with medics/stim ~5:00",
+    "engineering_bay": "3:30-4:30 (bio upgrades) or early = turret/wall",
+    "starport": "4:30-5:30 = wraith/dropship",
+    "bunker": "2:00-3:00 at natural = defensive expand",
+    "armory": "5:30+ = mech upgrades"
   }
 }

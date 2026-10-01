@@ -52,7 +52,7 @@ class StrategyCaller:
             return
         effort = (self.cfg.models.strategy_effort_transition if self.store.is_transition_trigger(trigger)
                   else self.cfg.models.strategy_effort_regular)
-        msg = user_message(self.store, self.ledger, trigger)
+        msg = user_message(self.store, self.ledger, trigger, self.knowledge)
         snapshot = self.store.latest
         self.store.mark_called()
         if self.lockstep:

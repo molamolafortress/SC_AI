@@ -1,0 +1,82 @@
+{
+  "matchup": "ZvP",
+  "openings": {
+    "12hatch_11pool": {
+      "summary": "Hatch at 12, pool at 11, gas after. Standard vs forge expand / 1-gate core; 3rd hatch ~2:30.",
+      "risk": "2-gate zealot pressure before lings, cannon rush"
+    },
+    "overpool": {
+      "summary": "Overlord 9, pool, hatch. Safe vs 2-gate: lings ~2:15 hold zealots with drones.",
+      "risk": "slightly behind vs forge FE"
+    },
+    "12pool": {
+      "summary": "Pool at 12, hatch after. Middle ground: lings ~2:40, decent economy.",
+      "risk": "proxy 2-gate"
+    },
+    "3hatch_muta": {
+      "summary": "Mid-game transition: 3 hatch, lair, spire, mutalisk harass vs 1-base or slow-corsair Protoss.",
+      "requires": [
+        "lair",
+        "spire"
+      ]
+    },
+    "2hatch_muta": {
+      "summary": "Mid-game transition: 2 hatch, fast lair/spire. Vs sair/DT or when 3rd hatch is unsafe.",
+      "requires": [
+        "lair",
+        "spire"
+      ]
+    },
+    "3hatch_hydra": {
+      "summary": "Mid-game transition: hydra den, range/speed, 5-hatch hydra timing vs forge FE / sair-reaver.",
+      "requires": [
+        "hydralisk_den"
+      ]
+    },
+    "lurker_contain": {
+      "summary": "Lurkers to hold the natural and 3rd vs zealot/goon pressure, buys time for 4-5 bases.",
+      "requires": [
+        "lurker_aspect"
+      ]
+    }
+  },
+  "counters": {
+    "zealot_pressure": [
+      "zergling",
+      "sunken_colony",
+      "drone pull"
+    ],
+    "corsair": [
+      "hydralisk",
+      "spore_colony",
+      "scourge"
+    ],
+    "dark_templar": [
+      "spore_colony",
+      "overlord spread",
+      "evolution_chamber"
+    ],
+    "goon_reaver": [
+      "mutalisk",
+      "zergling flank",
+      "lurker"
+    ],
+    "carrier": [
+      "scourge",
+      "hydralisk",
+      "devourer"
+    ]
+  },
+  "reference_timings": {
+    "gateway": "1:10-1:20 (1-gate); 2nd gateway by 1:45 = 2-gate zealot pressure ~3:00",
+    "assimilator": "1:30-1:50 (1-gate core); no gas by 2:30 = 2-gate zealots",
+    "cybernetics_core": "2:00-2:20 = dragoon ~3:30, or sair/DT tech",
+    "forge": "1:00-1:20 = forge FE (cannons at natural), can go 3 hatch greedy",
+    "nexus": "2nd nexus 1:40-2:30 = fast expand; later = 1-base tech or 2-gate",
+    "photon_cannon": "1:40-2:30 at natural = FE; in our base = cannon rush",
+    "stargate": "3:30-4:30 = corsair ~5:00, need spores/hydra",
+    "citadel_of_adun": "3:30-4:30 = speedlot or DT ~5:30-6:00",
+    "templar_archives": "4:30-5:30 = DT/storm, need detection",
+    "robotics_facility": "4:00-5:00 = reaver/observer"
+  }
+}

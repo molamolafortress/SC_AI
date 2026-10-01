@@ -86,3 +86,61 @@ def test_keep_current_plan_holds_previous_directive(tmp_path):
 def test_state_summary_roundtrip():
     s = StateSummary.model_validate(state(2400, "g"))
     assert s.me.units["drone"] > 0 and s.enemy.race == "terran"
+
+
+def _intel(minute: float) -> dict:
+    """Intel as the body emits it: scout reaches the enemy main at ~1:30, pool/gas seen, lings at 2:30."""
+    intel = {"enemy_build": "Unknown", "enemy_opener": "Unknown", "enemy_transition": "Unknown",
+             "flags": [], "mirror": {}, "buildings": {}, "workers_seen_max": 0, "expansions": 1,
+             "gas": {"count": 0}, "scout": {"enemy_main_found": minute >= 1.0}, "army": {}}
+    if minute >= 1.5:
+        intel["scout"].update({"main_scouted_frame": 2143, "main_scouted_time": "1:30", "main_last_seen_frame": 2143})
+        intel["workers_seen_max"] = 9
+        intel["buildings"]["command_center"] = {"count": 1, "first_seen_frame": 2143, "started_frame": 0, "started_time": "0:00"}
+    if minute >= 2.0:
+        intel["buildings"]["barracks"] = {"count": 1, "first_seen_frame": 2900, "started_frame": 1700, "started_time": "1:11",
+                                          "completes_frame": 3500, "completes_time": "2:27"}
+        intel["buildings"]["refinery"] = {"count": 1, "first_seen_frame": 2900, "started_frame": 2500, "started_time": "1:45"}
+        intel["gas"] = {"count": 1, "first_seen_frame": 2900, "first_seen_time": "2:01"}
+        intel.update({"enemy_build": "RaxFact", "enemy_opener": "1Rax", "enemy_build_state": "likely"})
+    if minute >= 2.5:
+        intel["army"] = {"first_seen_frame": 3570, "first_seen_time": "2:30", "max_by_type": {"marine": 2}}
+    return intel
+
+
+def test_intel_event_triggers_medium_call_with_brief(tmp_path):
+    cfg = make_cfg(tmp_path)
+    backend = FakeBackend()
+    client = TestClient(create_app(cfg, backend))
+    for frame in range(0, int(3.5 * 60 * 23.81), 24):
+        s = state(frame, "g_intel")
+        s["enemy"]["buildings_seen"] = {}  # isolate: no enemy_building_spotted triggers from the fake stream
+        s["intel"] = _intel(frame / 23.81 / 60)
+        client.post("/state", json=s)
+    triggers = [c[1].split("## 호출 이유\n")[1].split("\n")[0] for c in backend.calls]
+    efforts = dict(zip(triggers, (c[2] for c in backend.calls)))
+    assert "intel:scout_main" in triggers and "intel:gas" in triggers and "intel:army" in triggers
+    assert efforts["intel:scout_main"] == cfg.models.strategy_effort_transition == "medium"
+    msg = backend.calls[triggers.index("intel:gas")][1]
+    # same-frame intel events ride along in the delta's event line (one call covers the batch)
+    assert "intel:build_guess:RaxFact/1Rax/Unknown" in msg
+    assert "## 정찰 브리핑 (intel)" in msg
+    assert "barracks x1: 시작 1:11" in msg and "기준 1:10-1:20" in msg and "표준" in msg
+    assert "본진 도달 1:30" in msg and "enemy_build_guess" in msg
+    # the directive carries the free-text intel fields through validator and ledger untouched
+    log = [json.loads(l) for l in (tmp_path / "logs" / "g_intel.jsonl").read_text().splitlines()]
+    issued = [r for r in log if r["layer"] == "directive"]
+    assert issued and issued[-1]["output"]["enemy_build_guess"].startswith("build=RaxFact")
+    # intel is kept in the state record (the coach loop reads it from the log)
+    states = [r for r in log if r["layer"] == "state"]
+    assert states[-1]["input"]["intel"]["buildings"]["barracks"]["started_time"] == "1:11"
+
+
+def test_knowledge_builds_cover_mcrave_openings():
+    from bot.sidecar.config import SidecarConfig
+    body_names = {"12hatch_11pool", "overpool", "12pool", "3hatch_muta", "2hatch_muta", "3hatch_hydra", "lurker_contain"}
+    for matchup in ("ZvT", "ZvP", "ZvZ"):
+        k = Knowledge.load(SidecarConfig().knowledge_dir, matchup, "Fighting Spirit")
+        assert body_names <= k.opening_names, matchup
+        assert k.reference_timings, matchup
+    assert "9pool_speed" in Knowledge.load(SidecarConfig().knowledge_dir, "ZvZ", "Fighting Spirit").opening_names

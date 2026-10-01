@@ -1,9 +1,9 @@
 diff --git a/Source/McRave/Main/Sidecar.cpp b/Source/McRave/Main/Sidecar.cpp
 new file mode 100644
-index 0000000..bdda481
+index 0000000..f7c2599
 --- /dev/null
 +++ b/Source/McRave/Main/Sidecar.cpp
-@@ -0,0 +1,602 @@
+@@ -0,0 +1,772 @@
 +// Sidecar: SC_AI hooks 1-3 for McRave. See Sidecar.h and body/mcrave_port/HOOKS_IMPL.md.
 +//
 +// The heavy headers (cpp-httplib, nlohmann/json) are confined to this translation unit. They are included before
@@ -33,6 +33,7 @@ index 0000000..bdda481
 +#include "Map/Terrain/Terrain.h"
 +#include "Map/Walls/Walls.h"
 +#include "Micro/Combat/Combat.h"
++#include "Micro/Scout/Scouts.h"
 +#include "Strategy/Spy/Spy.h"
 +
 +using namespace BWAPI;
@@ -184,14 +185,52 @@ index 0000000..bdda481
 +
 +        // Validate a tuple against the same table the /bo chat command and Learning use (Learning::getBuilds()).
 +        // Returns true and fills the tuple if the combination is allowed for this matchup.
++        // McRave native names ("PoolHatch/12Pool/2HatchMuta", "2HatchMuta", "HatchPool/12Hatch"): each '/'-separated part is
++        // matched case-insensitively against Learning's build, opener and transition names. Unmatched parts fail.
++        bool resolveNativeOpening(const string &name, string &build, string &opener, string &transition)
++        {
++            auto &builds = Learning::getBuilds();
++            if (builds.empty())
++                return false;
++            build = currentBuild, opener = currentOpener, transition = currentTransition;
++            bool matched = false;
++            size_t pos = 0;
++            while (pos <= name.size()) {
++                auto next = name.find('/', pos);
++                auto part = norm(name.substr(pos, next == string::npos ? string::npos : next - pos));
++                pos       = next == string::npos ? name.size() + 1 : next + 1;
++                if (part.empty())
++                    continue;
++                bool found = false;
++                for (auto &b : builds) {
++                    if (norm(b.name) == part) { build = b.name; found = true; break; }
++                    for (auto &o : b.openers)
++                        if (norm(o.name) == part) { opener = o.name; found = true; break; }
++                    if (found) break;
++                    for (auto &t : b.transitions)
++                        if (norm(t.name) == part) { transition = t.name; found = true; break; }
++                    if (found) break;
++                }
++                if (!found)
++                    return false;
++                matched = true;
++            }
++            return matched;
++        }
++
 +        bool resolveOpening(const string &name, string &build, string &opener, string &transition)
 +        {
++            bool fromTable = false;
 +            auto it = openingTable.find(norm(name));
-+            if (it == openingTable.end())
++            if (it != openingTable.end()) {
++                fromTable  = true;
++                build      = it->second.build.empty() ? currentBuild : it->second.build;
++                opener     = it->second.opener.empty() ? currentOpener : it->second.opener;
++                transition = it->second.transition.empty() ? currentTransition : it->second.transition;
++            }
++            else if (!resolveNativeOpening(name, build, opener, transition))
 +                return false;
-+            build      = it->second.build.empty() ? currentBuild : it->second.build;
-+            opener     = it->second.opener.empty() ? currentOpener : it->second.opener;
-+            transition = it->second.transition.empty() ? currentTransition : it->second.transition;
++            const bool keepTransition = fromTable ? it->second.transition.empty() : (transition == currentTransition);
 +
 +            auto &builds = Learning::getBuilds();
 +            if (builds.empty())
@@ -204,7 +243,7 @@ index 0000000..bdda481
 +                if (!hasOpener)
 +                    return false;
 +                if (!hasTrans) {
-+                    if (it->second.transition.empty() && !b.transitions.empty())
++                    if (keepTransition && !b.transitions.empty())
 +                        transition = b.transitions.front().name; // build changed: keep-transition no longer fits, use first allowed
 +                    else
 +                        return false;
@@ -278,6 +317,133 @@ index 0000000..bdda481
 +            d["enemy_opener"]     = Spy::getEnemyOpener();
 +            d["enemy_transition"] = Spy::getEnemyTransition();
 +            tracker->bodyDefaults = d;
++        }
++
++        // ---- intel brief: scouting intelligence organised for the Strategy LLM (StateSummary.intel) --------------
++        // Cheap: called only when a state is emitted (every `every` frames or on events). Everything here is already
++        // computed by McRave (Spy timings, Stations, Scouts, Grids); this only collects and names it.
++        struct BuildingIntel {
++            int count = 0, firstSeen = -1, started = -1, completes = -1;
++        };
++        map<string, BuildingIntel> buildingIntel; // merged across frames so destroyed/forgotten buildings keep their timings
++        int mainScoutedFrame = -1, natScoutedFrame = -1, gasFirstSeen = -1, armyFirstSeen = -1, workersSeenMax = 0;
++
++        string timeStr(int frame) { return frame < 0 ? string("?") : Time(frame).toString(); }
++
++        string stratState(const string &name, Time likelyTime)
++        {
++            if (name.empty() || name == "Unknown") return "unknown";
++            return likelyTime.isUnknown() ? "possible" : "likely";
++        }
++
++        bool isWorkerName(const string &n) { return n == "drone" || n == "scv" || n == "probe"; }
++        bool isGasName(const string &n) { return n == "extractor" || n == "refinery" || n == "assimilator"; }
++        bool isNonArmyName(const string &n)
++        {
++            return isWorkerName(n) || n == "overlord" || n == "larva" || n == "egg" || n == "lurker_egg" || n == "cocoon" || n == "broodling" || n == "scarab" ||
++                   n == "interceptor" || n == "spider_mine" || n == "nuclear_missile";
++        }
++
++        void fillIntel()
++        {
++            const int frame = Broodwar->getFrameCount();
++            nlohmann::json j = nlohmann::json::object();
++
++            // 1. McRave Spy's enemy build inference (names from Strategy/Spy/Defs.h) and its "likely" strategy flags.
++            j["enemy_build"]            = Spy::getEnemyBuild();
++            j["enemy_opener"]           = Spy::getEnemyOpener();
++            j["enemy_transition"]       = Spy::getEnemyTransition();
++            j["enemy_build_state"]      = stratState(Spy::getEnemyBuild(), Spy::getEnemyBuildTime());
++            j["enemy_opener_state"]     = stratState(Spy::getEnemyOpener(), Spy::getEnemyOpenerTime());
++            j["enemy_transition_state"] = stratState(Spy::getEnemyTransition(), Spy::getEnemyTransitionTime());
++            // Spy's strategy flags (Strat::likely). The *Time() accessors are declared but not defined upstream, so flags only.
++            nlohmann::json flags = nlohmann::json::array();
++            auto flag = [&](const char *k, bool on) { if (on) flags.push_back(k); };
++            flag("expand", Spy::enemyFastExpand());
++            flag("rush", Spy::enemyRush());
++            flag("proxy", Spy::enemyProxy());
++            flag("possible_proxy", Spy::enemyPossibleProxy());
++            flag("gas_steal", Spy::enemyGasSteal());
++            flag("pressure", Spy::enemyPressure());
++            flag("wall", Spy::enemyWalled());
++            flag("greedy", Spy::enemyGreedy());
++            flag("invis", Spy::enemyInvis());
++            flag("detection", Spy::enemyDetection());
++            flag("turtle", Spy::enemyTurtle());
++            flag("fortress", Spy::enemyFortress());
++            j["flags"] = flags;
++            nlohmann::json mirror = nlohmann::json::object();
++            if (Players::ZvZ()) {
++                mirror["pool"]  = Spy::Zerg::enemyFasterPool() ? "faster_than_ours" : Spy::Zerg::enemySlowerPool() ? "slower_than_ours" : Spy::Zerg::enemyEqualPool() ? "equal" : "unknown";
++                mirror["speed"] = Spy::Zerg::enemyFasterSpeed() ? "faster_than_ours" : Spy::Zerg::enemySlowerSpeed() ? "slower_than_ours" : "unknown";
++            }
++            if (Players::vT()) mirror["terran_style"] = Spy::Terran::enemyMech() ? "mech" : Spy::Terran::enemyBio() ? "bio" : "unknown";
++            j["mirror"]          = mirror;
++            j["workers_pulled"]  = Spy::getWorkersPulled();
++
++            // 2. Enemy buildings: first-seen frame (tracker) + estimated start/complete frame (UnitInfo health-based estimate,
++            //    the same numbers Spy logs as "starts at"/"completes at").
++            for (auto &[name, b] : tracker->buildingsSeen()) {
++                auto &bi = buildingIntel[name];
++                bi.count = max(bi.count, b.count);
++                if (bi.firstSeen < 0) bi.firstSeen = b.firstFrame;
++            }
++            for (auto &u : Units::getUnits(PlayerState::Enemy)) {
++                auto &unit = *u;
++                if (!unit.getType().isBuilding())
++                    continue;
++                string n = unit.getType().getName();
++                auto us = n.find('_');
++                if (us != string::npos) n = n.substr(us + 1);
++                n = norm(n);
++                auto &bi = buildingIntel[n];
++                if (unit.frameStartedWhen() > 0 && (bi.started < 0 || unit.frameStartedWhen() < bi.started)) bi.started = unit.frameStartedWhen();
++                if (unit.frameCompletesWhen() > 0 && (bi.completes < 0 || unit.frameCompletesWhen() < bi.completes)) bi.completes = unit.frameCompletesWhen();
++                if (bi.firstSeen < 0) bi.firstSeen = frame;
++            }
++            nlohmann::json buildings = nlohmann::json::object();
++            int gasCount = 0;
++            for (auto &[name, bi] : buildingIntel) {
++                buildings[name] = {{"count", bi.count}, {"first_seen_frame", bi.firstSeen}, {"started_frame", bi.started}, {"started_time", timeStr(bi.started)},
++                                   {"completes_frame", bi.completes}, {"completes_time", timeStr(bi.completes)}};
++                if (isGasName(name)) {
++                    gasCount += bi.count;
++                    if (gasFirstSeen < 0 && bi.count > 0) gasFirstSeen = bi.firstSeen;
++                }
++            }
++            j["buildings"] = buildings;
++
++            // 3. Workers, gas, expansions.
++            int workers = 0;
++            for (auto &[name, su] : tracker->unitsSeen())
++                if (isWorkerName(name)) workers = max(workers, su.count);
++            workersSeenMax = max(workersSeenMax, workers);
++            j["workers_seen_max"] = workersSeenMax;
++            j["gas"] = {{"count", gasCount}, {"first_seen_frame", gasFirstSeen}, {"first_seen_time", timeStr(gasFirstSeen)}};
++            j["expansions"] = max(int(Stations::getStations(PlayerState::Enemy).size()), tracker->expansionsSeen());
++
++            // 4. Scouting status: when our scout reached the enemy main/natural and when they were last visible.
++            auto enemyMain = Terrain::getEnemyMain();
++            auto enemyNat  = Terrain::getEnemyNatural();
++            if (enemyMain && mainScoutedFrame < 0 && Stations::isBaseExplored(enemyMain)) mainScoutedFrame = frame;
++            if (enemyNat && natScoutedFrame < 0 && Stations::isBaseExplored(enemyNat)) natScoutedFrame = frame;
++            j["scout"] = {{"enemy_main_found", Terrain::foundEnemy()},
++                          {"main_scouted_frame", mainScoutedFrame}, {"main_scouted_time", timeStr(mainScoutedFrame)},
++                          {"natural_scouted_frame", natScoutedFrame}, {"natural_scouted_time", timeStr(natScoutedFrame)},
++                          {"full_scout", Scouts::gotFullScout()}, {"scout_denied", Scouts::enemyDeniedScout()},
++                          {"main_last_seen_frame", enemyMain ? Stations::lastVisible(enemyMain) : -1},
++                          {"natural_last_seen_frame", enemyNat ? Stations::lastVisible(enemyNat) : -1}};
++
++            // 5. Enemy army: max seen count per type, first sighting.
++            nlohmann::json army = nlohmann::json::object();
++            for (auto &[name, su] : tracker->unitsSeen()) {
++                if (isNonArmyName(name) || su.count <= 0)
++                    continue;
++                army[name] = su.count;
++                if (su.firstFrame >= 0 && (armyFirstSeen < 0 || su.firstFrame < armyFirstSeen)) armyFirstSeen = su.firstFrame;
++            }
++            j["army"] = {{"first_seen_frame", armyFirstSeen}, {"first_seen_time", timeStr(armyFirstSeen)}, {"max_by_type", army}};
++            tracker->intel = j;
 +        }
 +
 +        void meterCommands()
@@ -363,6 +529,7 @@ index 0000000..bdda481
 +        if (Broodwar->getFrameCount() % config.every == 0 || tracker->hasPendingEvents()) {
 +            fillCombatSim();
 +            fillBodyDefaults();
++            fillIntel();
 +        }
 +        client->onFrame(*tracker);
 +        drawStatus();
@@ -393,6 +560,9 @@ index 0000000..bdda481
 +        client.reset();
 +        tracker.reset();
 +        current.reset();
++        buildingIntel.clear();
++        mainScoutedFrame = natScoutedFrame = gasFirstSeen = armyFirstSeen = -1;
++        workersSeenMax   = 0;
 +    }
 +
 +    // Directive for the override hooks: empty when disabled or when the sidecar only observes (baseline runs).

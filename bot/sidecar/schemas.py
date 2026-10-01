@@ -41,6 +41,63 @@ class EnemyState(BaseModel):
     suspected_cloaked: list[dict] = Field(default_factory=list)
 
 
+class IntelBuilding(BaseModel):
+    count: int = 0
+    first_seen_frame: int = -1
+    started_frame: int = -1       # body estimate (McRave UnitInfo, health-based); -1 = unknown
+    started_time: str = "?"
+    completes_frame: int = -1
+    completes_time: str = "?"
+
+
+class IntelGas(BaseModel):
+    count: int = 0
+    first_seen_frame: int = -1
+    first_seen_time: str = "?"
+
+
+class IntelScout(BaseModel):
+    enemy_main_found: bool = False
+    main_scouted_frame: int = -1
+    main_scouted_time: str = "?"
+    natural_scouted_frame: int = -1
+    natural_scouted_time: str = "?"
+    full_scout: bool = False
+    scout_denied: bool = False
+    main_last_seen_frame: int = -1
+    natural_last_seen_frame: int = -1
+
+
+class IntelArmy(BaseModel):
+    first_seen_frame: int = -1
+    first_seen_time: str = "?"
+    max_by_type: dict[str, int] = Field(default_factory=dict)
+
+
+class Intel(BaseModel):
+    """Scouting intelligence organised by the body (McRave Spy + StateTracker). Empty when the body has none."""
+
+    enemy_build: str = "Unknown"
+    enemy_opener: str = "Unknown"
+    enemy_transition: str = "Unknown"
+    enemy_build_state: str = "unknown"        # unknown | possible | likely
+    enemy_opener_state: str = "unknown"
+    enemy_transition_state: str = "unknown"
+    flags: list[str] = Field(default_factory=list)   # Spy "likely" flags: expand, rush, proxy, pressure, greedy, wall, invis, ...
+    mirror: dict[str, str] = Field(default_factory=dict)  # ZvZ pool/speed relative to ours, terran_style
+    workers_pulled: int = 0
+    buildings: dict[str, IntelBuilding] = Field(default_factory=dict)
+    workers_seen_max: int = 0
+    gas: IntelGas = Field(default_factory=IntelGas)
+    expansions: int = 0
+    scout: IntelScout = Field(default_factory=IntelScout)
+    army: IntelArmy = Field(default_factory=IntelArmy)
+
+    @property
+    def empty(self) -> bool:
+        return not self.buildings and not self.scout.enemy_main_found and self.enemy_build == "Unknown"
+
+
 class GameEvent(BaseModel):
     type: str
     what: str | None = None
@@ -74,6 +131,7 @@ class StateSummary(BaseModel):
     execution: ExecutionFeedback = Field(default_factory=ExecutionFeedback)
     body_defaults: dict[str, str] = Field(default_factory=dict)
     metrics: dict[str, float] = Field(default_factory=dict)
+    intel: Intel = Field(default_factory=Intel)
 
 
 class ArmyObjective(BaseModel):
@@ -98,6 +156,10 @@ class Directive(BaseModel):
     scout_policy: str = "overlord_on_path"
     confidence: float = 0.5
     review_after_seconds: int = 45
+    # Intel reasoning, free text for traceability (validator leaves these alone; body ignores them).
+    enemy_build_guess: str = ""
+    expected_threats: list[str] = Field(default_factory=list)
+    our_response: str = ""
 
 
 class IssuedDirective(Directive):
