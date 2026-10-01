@@ -13,7 +13,7 @@ results = []
 for r in runs:
     results += collect(r / "logs")
 out.mkdir(parents=True, exist_ok=True)
-first = json.load(open(runs[0] / "metrics.json", encoding="utf-8"))
+first = next((json.load(open(r / "metrics.json", encoding="utf-8")) for r in runs if (r / "metrics.json").exists()), {})
 metrics = {"run_id": out.name, "merged_from": [r.name for r in runs], "args": first.get("args"), **{k: v for k, v in first.items() if k in ("mode", "lockstep", "alternate_sides", "safety_interval_seconds", "decide_at_start", "strategy", "strategy_backend", "opponent", "map")}, **summarize(results)}
 (out / "metrics.json").write_text(json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8")
 print(json.dumps({k: metrics[k] for k in ("games", "wins", "timeouts", "win_rate", "win_rate_ci95", "avg_frames", "avg_cost_usd", "avg_strategy_calls", "avg_flip_flops")}, ensure_ascii=False))
