@@ -44,8 +44,12 @@ message(STATUS "McRave: ${_n} translation units, BWAPI headers: ${BWAPI_INCLUDE_
 set(CMAKE_SHARED_LIBRARY_PREFIX "")   # McRave.so, not libMcRave.so (BWAPILauncher dlopens by path)
 add_library(McRave SHARED ${MCRAVE_SOURCES})
 
+# SC_AI sidecar client (header-only: SidecarClient.hpp, StateTracker.hpp, third_party/{httplib.h,json.hpp}),
+# used only by McRave/Main/Sidecar.cpp (patch 0006).
+set(SC_AI_SIDECAR_CLIENT_DIR "${SC_AI_ROOT}/body/sidecar_client" CACHE PATH "header-only sidecar client")
 target_include_directories(McRave PRIVATE
   "${BWAPI_INCLUDE_DIR}"
+  "${SC_AI_SIDECAR_CLIENT_DIR}"
   "${MCRAVE_SRC}/BWEB"
   "${MCRAVE_SRC}/BWEM"
   "${MCRAVE_SRC}/Horizon"

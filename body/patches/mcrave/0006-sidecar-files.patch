@@ -1,0 +1,649 @@
+diff --git a/Source/McRave/Main/Sidecar.cpp b/Source/McRave/Main/Sidecar.cpp
+new file mode 100644
+index 0000000..729d93c
+--- /dev/null
++++ b/Source/McRave/Main/Sidecar.cpp
+@@ -0,0 +1,585 @@
++// Sidecar: SC_AI hooks 1-3 for McRave. See Sidecar.h and body/mcrave_port/HOOKS_IMPL.md.
++//
++// The heavy headers (cpp-httplib, nlohmann/json) are confined to this translation unit. They are included before
++// any McRave header because Main/Common.h does `using namespace BWAPI;` at global scope.
++#include "SidecarClient.hpp" // body/sidecar_client (CMake include dir SC_AI_SIDECAR_CLIENT_DIR)
++
++#include "Sidecar.h"
++
++#include <algorithm>
++#include <cctype>
++#include <cstdlib>
++#include <fstream>
++#include <memory>
++#include <set>
++#include <string>
++
++#include "Builds/All/All.h"
++#include "Builds/All/BuildOrder.h"
++#include "Builds/All/Learning.h"
++#include "Info/Player/PlayerInfo.h"
++#include "Info/Player/Players.h"
++#include "Info/Unit/UnitInfo.h"
++#include "Info/Unit/Units.h"
++#include "Main/Common.h"
++#include "Main/Logger.h"
++#include "Map/Stations/Stations.h"
++#include "Map/Terrain/Terrain.h"
++#include "Map/Walls/Walls.h"
++#include "Micro/Combat/Combat.h"
++#include "Strategy/Spy/Spy.h"
++
++using namespace BWAPI;
++using namespace std;
++using namespace UnitTypes;
++using namespace McRave::BuildOrder::All;
++
++namespace McRave::Sidecar {
++
++    namespace {
++
++        // ---- configuration -------------------------------------------------------------------------------------
++        struct Config {
++            bool enabled   = false;
++            string host    = "127.0.0.1";
++            int port       = 8770;
++            int every      = 24;
++            int timeoutMs  = 2000;
++        };
++
++        Config readConfig()
++        {
++            Config c;
++            ifstream ini("bwapi-data/sidecar.ini");
++            if (ini.is_open()) {
++                c.enabled = true;
++                string line;
++                while (getline(ini, line)) {
++                    auto eq = line.find('=');
++                    if (line.empty() || line[0] == '#' || line[0] == ';' || eq == string::npos)
++                        continue;
++                    auto key = line.substr(0, eq), val = line.substr(eq + 1);
++                    auto trim = [](string s) {
++                        while (!s.empty() && isspace(static_cast<unsigned char>(s.back()))) s.pop_back();
++                        size_t i = 0;
++                        while (i < s.size() && isspace(static_cast<unsigned char>(s[i]))) i++;
++                        return s.substr(i);
++                    };
++                    key = trim(key), val = trim(val);
++                    if (key == "host") c.host = val;
++                    else if (key == "port") c.port = atoi(val.c_str());
++                    else if (key == "every") c.every = max(1, atoi(val.c_str()));
++                    else if (key == "timeout_ms") c.timeoutMs = max(1, atoi(val.c_str()));
++                    else if (key == "enabled") c.enabled = !(val == "0" || val == "false" || val == "no");
++                }
++            }
++            if (const char *h = getenv("SIDECAR_HOST")) { c.enabled = true; c.host = h; }
++            if (const char *p = getenv("SIDECAR_PORT")) { c.enabled = true; c.port = atoi(p); }
++            return c;
++        }
++
++        // ---- state ---------------------------------------------------------------------------------------------
++        Config config;
++        bool started = false;
++        unique_ptr<SidecarClient> client;
++        unique_ptr<StateTracker> tracker;
++        optional<Directive> current;   // valid for this frame, or empty
++        const optional<Directive> none;
++        string lastLoggedId;
++        set<string> warnedNames;
++
++        // Hook 3 metering (no McRave edits): units whose last command was issued this frame.
++        int commandsTotal = 0;
++        int commandsThisFrame = 0;
++        vector<int> commandRing(1440, 0); // last 60 s at 24 fps
++        long long commandRingSum = 0;
++        int lastMeteredFrame = -1;
++
++        void warnOnce(const string &what)
++        {
++            if (warnedNames.insert(what).second)
++                LOG("Sidecar: ", what);
++        }
++
++        // ---- name helpers --------------------------------------------------------------------------------------
++        string norm(string s)
++        {
++            string out;
++            for (auto ch : s) {
++                if (ch == ' ' || ch == '-') ch = '_';
++                out += static_cast<char>(tolower(static_cast<unsigned char>(ch)));
++            }
++            return out;
++        }
++
++        // "zergling" -> Zerg_Zergling. Accepts StateTracker's normalised names ("spawning_pool") and a few aliases.
++        UnitType unitTypeFromName(const string &raw)
++        {
++            static map<string, UnitType> table;
++            if (table.empty()) {
++                for (auto &t : UnitTypes::allUnitTypes()) {
++                    if (t.getRace() != Races::Zerg)
++                        continue;
++                    string n = t.getName();
++                    if (n.rfind("Zerg_", 0) == 0) n = n.substr(5);
++                    table[norm(n)] = t;
++                }
++                table["ling"]  = Zerg_Zergling;
++                table["lings"] = Zerg_Zergling;
++                table["muta"]  = Zerg_Mutalisk;
++                table["mutas"] = Zerg_Mutalisk;
++                table["hydra"] = Zerg_Hydralisk;
++                table["ultra"] = Zerg_Ultralisk;
++            }
++            auto it = table.find(norm(raw));
++            return it == table.end() ? UnitTypes::None : it->second;
++        }
++
++        bool isZergArmyType(UnitType t)
++        {
++            return t != UnitTypes::None && t.getRace() == Races::Zerg && !t.isBuilding() && !t.isWorker() && t != Zerg_Larva && t != Zerg_Egg && t != Zerg_Overlord &&
++                   t != Zerg_Lurker_Egg && t != Zerg_Cocoon && t != Zerg_Broodling && t != Zerg_Infested_Terran;
++        }
++
++        // ---- opening mapping: Directive.opening (knowledge/builds names) -> McRave build/opener/transition -------
++        struct OpeningMap {
++            string build, opener, transition; // "" = keep McRave's current value
++        };
++        const map<string, OpeningMap> openingTable = {
++            // openers (build + opener; transition kept if still allowed, else first allowed for that build)
++            {"12hatch_11pool", {"HatchPool", "12Hatch", ""}},
++            {"12hatch",        {"HatchPool", "12Hatch", ""}},
++            {"11hatch",        {"HatchPool", "11Hatch", ""}},
++            {"10hatch",        {"HatchPool", "10Hatch", ""}},
++            {"9hatch",         {"HatchPool", "9Hatch", ""}},
++            {"3hatch",         {"HatchPool", "3Hatch", ""}},
++            {"3hatch_before_pool", {"HatchPool", "3Hatch", ""}},
++            {"overpool",       {"PoolHatch", "Overpool", ""}},
++            {"12pool",         {"PoolHatch", "12Pool", ""}},
++            {"9pool",          {"PoolLair", "9Pool", ""}},
++            {"9pool_speed",    {"PoolLair", "9Pool", ""}},
++            {"gaspool",        {"PoolLair", "Gaspool", ""}},
++            {"4pool",          {"PoolLair", "4Pool", ""}},
++            // transitions (build + opener kept)
++            {"1hatch_muta",    {"", "", "1HatchMuta"}},
++            {"2hatch_muta",    {"", "", "2HatchMuta"}},
++            {"3hatch_muta",    {"", "", "3HatchMuta"}},
++            {"2hatch_hydra",   {"", "", "2HatchHydra"}},
++            {"3hatch_hydra",   {"", "", "3HatchHydra"}},
++            {"4hatch_hydra",   {"", "", "4HatchHydra"}},
++            {"6hatch_hydra",   {"", "", "6HatchHydra"}},
++            {"1hatch_lurker",  {"", "", "1HatchLurker"}},
++            {"2hatch_lurker",  {"", "", "2HatchLurker"}},
++            {"lurker_contain", {"", "", "1HatchLurker"}},
++            {"2hatch_speedling", {"", "", "2HatchSpeedling"}},
++            {"3hatch_speedling", {"", "", "3HatchSpeedling"}},
++        };
++
++        // Validate a tuple against the same table the /bo chat command and Learning use (Learning::getBuilds()).
++        // Returns true and fills the tuple if the combination is allowed for this matchup.
++        bool resolveOpening(const string &name, string &build, string &opener, string &transition)
++        {
++            auto it = openingTable.find(norm(name));
++            if (it == openingTable.end())
++                return false;
++            build      = it->second.build.empty() ? currentBuild : it->second.build;
++            opener     = it->second.opener.empty() ? currentOpener : it->second.opener;
++            transition = it->second.transition.empty() ? currentTransition : it->second.transition;
++
++            auto &builds = Learning::getBuilds();
++            if (builds.empty())
++                return false; // FFA / no enemy: Learning did not build the table, do not guess
++            for (auto &b : builds) {
++                if (b.name != build)
++                    continue;
++                auto hasOpener = any_of(b.openers.begin(), b.openers.end(), [&](auto &o) { return o.name == opener; });
++                auto hasTrans  = any_of(b.transitions.begin(), b.transitions.end(), [&](auto &t) { return t.name == transition; });
++                if (!hasOpener)
++                    return false;
++                if (!hasTrans) {
++                    if (it->second.transition.empty() && !b.transitions.empty())
++                        transition = b.transitions.front().name; // build changed: keep-transition no longer fits, use first allowed
++                    else
++                        return false;
++                }
++                return true;
++            }
++            return false;
++        }
++
++        const BWEB::Station *stationFor(const string &location)
++        {
++            auto l = norm(location);
++            if (l == "main") return Terrain::getMyMain();
++            if (l == "natural") return Terrain::getMyNatural();
++            if (l == "enemy_main") return Terrain::getEnemyMain();
++            if (l == "enemy_natural") return Terrain::getEnemyNatural();
++            return nullptr;
++        }
++
++        bool isAttackObjective(const string &type) { return type == "attack" || type == "contain" || type == "harass"; }
++        bool isDefendObjective(const string &type) { return type == "defend" || type == "hold"; }
++
++        // ---- hook 2 payload extras -----------------------------------------------------------------------------
++        void fillCombatSim()
++        {
++            nlohmann::json sim = nlohmann::json::object();
++            auto mine  = Players::getStrength(PlayerState::Self);
++            auto enemy = Players::getStrength(PlayerState::Enemy);
++            auto myTotal    = mine.groundToGround + mine.groundToAir + mine.airToGround + mine.airToAir;
++            auto enemyTotal = enemy.groundToGround + enemy.groundToAir + enemy.airToGround + enemy.airToAir;
++            sim["my_strength"]    = myTotal;
++            sim["enemy_strength"] = enemyTotal;
++            if (enemyTotal > 0.0)
++                sim["my_army_vs_seen"] = myTotal / enemyTotal;
++            sim["my_ground_to_ground"]    = mine.groundToGround;
++            sim["enemy_ground_to_ground"] = enemy.groundToGround;
++            sim["enemy_air_to_ground"]    = enemy.airToGround;
++
++            // Horizon per-unit simulation: fraction of combat units currently in SimState::Win and their mean sim value
++            int combat = 0, wins = 0, attacking = 0;
++            double simSum = 0.0;
++            for (auto &u : Units::getUnits(PlayerState::Self)) {
++                if (u->getRole() != Role::Combat)
++                    continue;
++                combat++;
++                simSum += u->getSimValue();
++                if (u->getSimState() == SimState::Win) wins++;
++                if (u->getGlobalState() == GlobalState::Attack) attacking++;
++            }
++            if (combat > 0) {
++                sim["sim_win_fraction"]   = double(wins) / combat;
++                sim["sim_value_mean"]     = simSum / combat;
++                sim["global_attack_frac"] = double(attacking) / combat;
++            }
++            sim["enemy_threatening"] = Units::enemyThreatening() ? 1.0 : 0.0;
++            tracker->combatSim = sim;
++        }
++
++        void fillBodyDefaults()
++        {
++            nlohmann::json d = nlohmann::json::object();
++            d["build"]      = BuildOrder::getCurrentBuild();
++            d["opener"]     = BuildOrder::getCurrentOpener();
++            d["transition"] = BuildOrder::getCurrentTransition();
++            d["opening"]    = BuildOrder::getCurrentBuild() + "/" + BuildOrder::getCurrentOpener() + "/" + BuildOrder::getCurrentTransition();
++            d["stance"]     = BuildOrder::isAllIn() ? "all_in" : (BuildOrder::isPressure() || BuildOrder::isRush()) ? "aggressive" : "defensive";
++            d["expand"]     = BuildOrder::shouldExpand() ? "now" : "hold";
++            d["wall_natural"] = BuildOrder::isWallNat() ? "natural_wall" : "none";
++            d["in_opening"] = inOpening ? "true" : "false";
++            d["enemy_build"]      = Spy::getEnemyBuild();
++            d["enemy_opener"]     = Spy::getEnemyOpener();
++            d["enemy_transition"] = Spy::getEnemyTransition();
++            tracker->bodyDefaults = d;
++        }
++
++        void meterCommands()
++        {
++            const int frame = Broodwar->getFrameCount();
++            if (frame == lastMeteredFrame)
++                return;
++            lastMeteredFrame  = frame;
++            commandsThisFrame = 0;
++            for (auto u : Broodwar->self()->getUnits()) {
++                if (u->exists() && u->getLastCommandFrame() == frame)
++                    commandsThisFrame++;
++            }
++            commandsTotal += commandsThisFrame;
++            auto &slot = commandRing[frame % commandRing.size()];
++            commandRingSum += commandsThisFrame - slot;
++            slot = commandsThisFrame;
++
++            nlohmann::json m = nlohmann::json::object();
++            m["commands_this_frame"] = commandsThisFrame;
++            m["commands_total"]      = commandsTotal;
++            m["apm_60s"]             = frame >= int(commandRing.size()) ? double(commandRingSum) : (frame > 0 ? double(commandRingSum) * 1440.0 / frame : 0.0);
++            m["apm_game"]            = frame > 0 ? double(commandsTotal) * 1440.0 / frame : 0.0;
++            tracker->metrics = m;
++        }
++
++        void drawStatus()
++        {
++            if (!client)
++                return;
++            auto status = client->connected() ? "ok" : "down";
++            if (current)
++                Broodwar->drawTextScreen(432, 46, "%csidecar[%s] %s %s/%s exp %d", Text::Green, status, current->directive_id.c_str(), current->stance.c_str(),
++                                         current->expand_policy.c_str(), current->expires_frame);
++            else
++                Broodwar->drawTextScreen(432, 46, "%csidecar[%s] no directive (posts %d/%d)", Text::Grey, status, client->postsSent(), client->postsFailed());
++        }
++    } // namespace
++
++    bool enabled() { return started && config.enabled && client != nullptr; }
++
++    // ---- hook 2 ------------------------------------------------------------------------------------------------
++    void onStart()
++    {
++        config  = readConfig();
++        started = true;
++        if (!config.enabled)
++            return;
++        tracker = make_unique<StateTracker>();
++        client  = make_unique<SidecarClient>(config.host, config.port, config.every, config.timeoutMs);
++        LOG("Sidecar: enabled, ", config.host, ":", config.port, " every ", config.every, " frames, game_id ", client->gameId());
++    }
++
++    void onFrame()
++    {
++        if (!enabled())
++            return;
++        const int frame = Broodwar->getFrameCount();
++        current = client->directive();
++        if (current && !current->valid(frame))
++            current.reset();
++        if (current && current->directive_id != lastLoggedId) {
++            lastLoggedId = current->directive_id;
++            LOG("Sidecar: directive ", current->directive_id, " opening=", current->opening, " stance=", current->stance, " expand=", current->expand_policy,
++                " objective=", current->objective_type, "@", current->objective_location, " wall=", current->wall_natural, " expires=", current->expires_frame, " reason=", current->change_reason);
++        }
++    }
++
++    void emitIfDue()
++    {
++        if (!enabled())
++            return;
++        meterCommands();
++        tracker->update();
++        if (Broodwar->getFrameCount() % config.every == 0 || tracker->hasPendingEvents()) {
++            fillCombatSim();
++            fillBodyDefaults();
++        }
++        client->onFrame(*tracker);
++        drawStatus();
++    }
++
++    void onUnitDiscover(Unit unit)
++    {
++        // Enemy buildings are detected by StateTracker::update() (first-seen events); nothing extra is needed here.
++        (void)unit;
++    }
++
++    void onUnitDestroy(Unit unit)
++    {
++        if (!enabled() || !unit)
++            return;
++        tracker->onUnitDestroy(unit);
++        if (unit->getPlayer() == Broodwar->self() && unit->getType().isBuilding())
++            tracker->pushEvent("my_building_lost", unit->getType().getName());
++    }
++
++    void onEnd(bool isWinner)
++    {
++        if (!enabled())
++            return;
++        LOG("Sidecar: game end, ", isWinner ? "win" : "loss", ", posts ", client->postsSent(), " failed ", client->postsFailed(), ", commands ", commandsTotal);
++        client->onEnd(isWinner);
++        client.reset();
++        tracker.reset();
++        current.reset();
++    }
++
++    const optional<Directive> &directive() { return enabled() ? current : none; }
++
++    // ---- hook 1 ------------------------------------------------------------------------------------------------
++    void applyOpening()
++    {
++        auto &d = directive();
++        if (!d || d->opening.empty())
++            return;
++        string build, opener, transition;
++        if (!resolveOpening(d->opening, build, opener, transition)) {
++            warnOnce("opening '" + d->opening + "' has no allowed McRave build for this matchup, keeping " + currentBuild + "/" + currentOpener + "/" + currentTransition);
++            return;
++        }
++        auto buildChange = (build != currentBuild || opener != currentOpener);
++        // Build/opener may only change before the transition started; a transition-only change is fine while the book is active.
++        if (buildChange && inTransition)
++            return;
++        if (!buildChange && transition == currentTransition)
++            return;
++        if (!inOpening)
++            return;
++        LOG("Sidecar: opening ", d->opening, " -> ", build, "/", opener, "/", transition, " (was ", currentBuild, "/", currentOpener, "/", currentTransition, ")");
++        BuildOrder::setLearnedBuild(build, opener, transition);
++    }
++
++    void applyBuildFlags()
++    {
++        auto &d = directive();
++        if (!d)
++            return;
++        if (Broodwar->self()->getRace() != Races::Zerg)
++            return;
++        wallNat = norm(d->wall_natural) != "none" && !d->wall_natural.empty();
++        if (d->stance == "all_in")
++            pressure = true;
++    }
++
++    bool techPriorityActive()
++    {
++        auto &d = directive();
++        if (!d || d->tech_priority.empty())
++            return false;
++        for (auto &name : d->tech_priority)
++            if (isZergArmyType(unitTypeFromName(name)))
++                return true;
++        return false;
++    }
++
++    void applyTechPriority()
++    {
++        auto &d = directive();
++        if (!d || d->tech_priority.empty())
++            return;
++        // Only army unit names form McRave's unitOrder (tech path). Upgrades/buildings in the list ("metabolic_boost",
++        // "lair") are left to McRave's own queueUpgrades()/getTechBuildings().
++        vector<UnitType> order;
++        for (auto &name : d->tech_priority) {
++            auto t = unitTypeFromName(name);
++            if (isZergArmyType(t) && find(order.begin(), order.end(), t) == order.end())
++                order.push_back(t);
++        }
++        if (order.empty())
++            return;
++        unitOrder = order;
++    }
++
++    void applyComposition()
++    {
++        auto &d = directive();
++        if (!d || d->unit_mix_target.empty())
++            return;
++        if (inOpening && d->keep_current_plan)
++            return; // leave the opening book's one-hot ladder alone
++        map<UnitType, double> mix;
++        for (auto &[name, weight] : d->unit_mix_target) {
++            auto t = unitTypeFromName(name);
++            if (t == UnitTypes::None || weight <= 0.0) {
++                if (t == UnitTypes::None) warnOnce("unit_mix_target: unknown unit '" + name + "'");
++                continue;
++            }
++            if (t == Zerg_Drone || t == Zerg_Overlord) { mix[t] = weight; continue; }
++            if (!isZergArmyType(t)) continue;
++            if (!BuildOrder::unlockReady(t)) {
++                focusUnits.insert(t); // getTechBuildings() will queue the prerequisites
++                continue;
++            }
++            mix[t] = weight;
++        }
++        if (mix.empty())
++            return;
++        armyComposition = mix;
++    }
++
++    void applyExpandPolicy(int hatchCount)
++    {
++        auto &d = directive();
++        if (!d)
++            return;
++        auto policy = norm(d->expand_policy);
++        if (policy == "never") {
++            expandDesired = false;
++            wantThird     = false;
++            if (int(Stations::getStations(PlayerState::Self).size()) >= 2)
++                wantNatural = false;
++            buildQueue[Zerg_Hatchery] = min(buildQueue[Zerg_Hatchery], hatchCount);
++        }
++        else if (policy == "greedy") {
++            if (Stations::getMiningStationsCount() <= 5 && vis(Zerg_Hatchery) - com(Zerg_Hatchery) == 0) {
++                expandDesired             = true;
++                buildQueue[Zerg_Hatchery] = max(buildQueue[Zerg_Hatchery], hatchCount + 1);
++                if (int(Stations::getStations(PlayerState::Self).size()) <= 1) wantNatural = true;
++                if (int(Stations::getStations(PlayerState::Self).size()) <= 2) wantThird = true;
++            }
++        }
++        // "allow_when_safe": McRave's own expandDesired logic
++    }
++
++    void applyStance(vector<UnitType> &staticRetreatTypes)
++    {
++        auto &d = directive();
++        if (!d)
++            return;
++        auto stance = norm(d->stance);
++        if (stance == "defensive") {
++            for (auto &t : BuildOrder::getUnlockedList()) {
++                if (isZergArmyType(t) && find(staticRetreatTypes.begin(), staticRetreatTypes.end(), t) == staticRetreatTypes.end())
++                    staticRetreatTypes.push_back(t);
++            }
++        }
++        else if (stance == "aggressive" || stance == "all_in") {
++            staticRetreatTypes.clear(); // workers are re-added by updateStaticStates() right after this call
++        }
++        // "neutral": McRave's own rules
++    }
++
++    void applyAttackPosition(Position &attackPosition)
++    {
++        auto &d = directive();
++        if (!d || !isAttackObjective(norm(d->objective_type)))
++            return;
++        auto station = stationFor(d->objective_location);
++        if (!station || Stations::ownedBy(station) != PlayerState::Enemy)
++            return; // unknown or not (yet) enemy-owned: McRave's own target
++        attackPosition = station->getResourceCentroid();
++    }
++
++    void applyDefendPosition(bool &defendNatural, bool &holdNatural, const BWEM::ChokePoint *&defendChoke, const BWEM::Area *&defendArea, Position &defendPosition,
++                             const BWEB::Station *&defendStation)
++    {
++        auto &d = directive();
++        if (!d || !isDefendObjective(norm(d->objective_type)))
++            return;
++        auto l = norm(d->objective_location);
++        if (l == "natural") {
++            auto nat = Terrain::getMyNatural();
++            if (!nat || !Terrain::getNaturalChoke() || Stations::ownedBy(nat) != PlayerState::Self)
++                return; // not ours yet: keep McRave's choice
++            defendNatural  = true;
++            holdNatural    = true;
++            defendChoke    = Terrain::getNaturalChoke();
++            defendArea     = Terrain::getNaturalArea();
++            defendPosition = Stations::getDefendPosition(nat);
++            defendStation  = nat;
++        }
++        else if (l == "main") {
++            auto main = Terrain::getMyMain();
++            if (!main || !Terrain::getMainChoke())
++                return;
++            defendNatural  = false;
++            holdNatural    = false;
++            defendChoke    = Terrain::getMainChoke();
++            defendArea     = Terrain::getMainArea();
++            defendPosition = Stations::getDefendPosition(main);
++            defendStation  = main;
++        }
++    }
++
++    // Static defense counts apply to the natural only (wall if McRave made one there, else the natural station).
++    namespace {
++        optional<int> defenseFor(const char *key, int have)
++        {
++            auto &d = directive();
++            if (!d)
++                return nullopt;
++            auto it = d->static_defense.find(key);
++            if (it == d->static_defense.end())
++                return nullopt;
++            return max(0, it->second) - have;
++        }
++        bool isNaturalWall(const BWEB::Wall *wall) { return wall && wall == Walls::getNaturalWall() && wall->getStation() && wall->getStation()->isNatural(); }
++        bool isNaturalStationWithoutWall(const BWEB::Station *station) { return station && station->isNatural() && !Walls::getNaturalWall(); }
++    } // namespace
++
++    optional<int> groundDefensesFor(const BWEB::Wall *wall) { return isNaturalWall(wall) ? defenseFor("sunken", wall->getGroundDefenseCount()) : nullopt; }
++    optional<int> airDefensesFor(const BWEB::Wall *wall) { return isNaturalWall(wall) ? defenseFor("spore", wall->getAirDefenseCount()) : nullopt; }
++    optional<int> groundDefensesFor(const BWEB::Station *station)
++    {
++        return isNaturalStationWithoutWall(station) ? defenseFor("sunken", Stations::getGroundDefenseCount(station)) : nullopt;
++    }
++    optional<int> airDefensesFor(const BWEB::Station *station)
++    {
++        return isNaturalStationWithoutWall(station) ? defenseFor("spore", Stations::getAirDefenseCount(station)) : nullopt;
++    }
++} // namespace McRave::Sidecar
+diff --git a/Source/McRave/Main/Sidecar.h b/Source/McRave/Main/Sidecar.h
+new file mode 100644
+index 0000000..ab9355d
+--- /dev/null
++++ b/Source/McRave/Main/Sidecar.h
+@@ -0,0 +1,52 @@
++// Sidecar: SC_AI hooks (body/HOOKS.md section 5). Thin wrapper around body/sidecar_client/{SidecarClient,StateTracker}.hpp.
++//
++// Enabled only when env SIDECAR_HOST or SIDECAR_PORT is set, or bwapi-data/sidecar.ini exists. Otherwise every
++// function here is a no-op and McRave plays exactly as upstream (the body must play without the sidecar).
++// Every apply*() is also a no-op when there is no valid (unexpired) directive, so an expired directive reverts
++// to McRave's own per-frame logic without any cleanup.
++#pragma once
++#include <BWAPI.h>
++
++#include <optional>
++#include <vector>
++
++namespace BWEB {
++    class Station;
++    class Wall;
++} // namespace BWEB
++namespace BWEM {
++    class ChokePoint;
++    class Area;
++} // namespace BWEM
++struct Directive; // body/sidecar_client/SidecarClient.hpp (only Sidecar.cpp sees the full type)
++
++namespace McRave::Sidecar {
++    bool enabled();
++
++    // Hook 2: lifecycle (McRaveModule)
++    void onStart();
++    void onFrame();   // top of onFrame, after Util::onFrame(): poll the latest directive, drop it if expired
++    void emitIfDue(); // end of onFrame, before Visuals::onFrame(): tracker update + StateSummary every 24 frames; hook 3 metering
++    void onUnitDiscover(BWAPI::Unit);
++    void onUnitDestroy(BWAPI::Unit);
++    void onEnd(bool isWinner);
++
++    // Current directive, only if valid(frame); otherwise an empty optional (expiry -> McRave defaults).
++    const std::optional<Directive> &directive();
++
++    // Hook 1: strategy injection. Each is called by McRave right after it computed its own value and overrides it.
++    void applyOpening();                                      // ZergBuildOrder.cpp opener(), before ZvT()/ZvP()/ZvZ()
++    void applyBuildFlags();                                   // BuildOrder.cpp updateBuild(), after Zerg::opener(): wallNat, pressure
++    void applyTechPriority();                                 // ZergBuildOrder.cpp tech(), before the unitOrder loop
++    bool techPriorityActive();                                // ZergBuildOrder.cpp switchComposition(), top: skip McRave's switch
++    void applyComposition();                                  // ZergBuildOrder.cpp composition(), last statement
++    void applyExpandPolicy(int hatchCount);                   // ZergBuildOrder.cpp queueExpansions(), after buildQueue[Hatchery] = max(..)
++    void applyStance(std::vector<BWAPI::UnitType> &staticRetreatTypes); // Combat/State.cpp updateStaticStates(), after updateZStaticStates()
++    void applyAttackPosition(BWAPI::Position &attackPosition);          // Combat.cpp onFrame(), after findAttackPosition()
++    void applyDefendPosition(bool &defendNatural, bool &holdNatural, const BWEM::ChokePoint *&defendChoke, const BWEM::Area *&defendArea,
++                             BWAPI::Position &defendPosition, const BWEB::Station *&defendStation); // after findDefendPosition()
++    std::optional<int> groundDefensesFor(const BWEB::Wall *);    // Walls.cpp updateDefenses(wall) -> needGroundDefenses(wall)
++    std::optional<int> airDefensesFor(const BWEB::Wall *);       // Walls.cpp updateDefenses(wall) -> needAirDefenses(wall)
++    std::optional<int> groundDefensesFor(const BWEB::Station *); // Stations.cpp needGroundDefenses(station)
++    std::optional<int> airDefensesFor(const BWEB::Station *);    // Stations.cpp needAirDefenses(station)
++} // namespace McRave::Sidecar

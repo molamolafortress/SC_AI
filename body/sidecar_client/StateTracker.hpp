@@ -59,6 +59,11 @@ public:
     }
     bool hasPendingEvents() const { return !events_.empty(); }
 
+    // Filled by the body each frame (optional): Horizon/strength numbers, McRave's own choices, command metering.
+    nlohmann::json combatSim = nlohmann::json::object();
+    nlohmann::json bodyDefaults = nlohmann::json::object();
+    nlohmann::json metrics = nlohmann::json::object();
+
     nlohmann::json toStateSummary(const std::string& gameId, const std::string& directiveId) {
         auto& bw = BWAPI::Broodwar;
         auto* me = bw->self();
@@ -108,10 +113,11 @@ public:
             {"enemy", {{"race", enemyRace_.empty() ? "unknown" : enemyRace_}, {"units_seen", enemyUnits},
                        {"buildings_seen", enemyBuildings}, {"expansions", expansions()}, {"army_value_seen", enemyArmy},
                        {"army_pos_seen", nullptr}, {"suspected_cloaked", cloaked_}}},
-            {"combat_sim", nlohmann::json::object()},
+            {"combat_sim", combatSim},
             {"events", events},
             {"execution", {{"directive_id", directiveId.empty() ? nlohmann::json(nullptr) : nlohmann::json(directiveId)}, {"goals", nlohmann::json::array()}}},
-            {"body_defaults", nlohmann::json::object()},
+            {"body_defaults", bodyDefaults},
+            {"metrics", metrics},
         };
     }
 

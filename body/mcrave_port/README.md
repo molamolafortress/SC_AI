@@ -125,6 +125,10 @@ an iterator), which is what MSVC effectively did with the lifetime-extended temp
 | `McRave/Main/Visuals.cpp` `getTextColor()`, `Map/Walls/Walls.cpp` three `*TypeCount` | add a `return` | non-void functions fell off the end (UB); none has a caller |
 | `McRave/Macro/Producing/Producing.cpp` | `building && building->getAddon()` | `isCreateable(nullptr, type)` is called for larva; only Terran types dereference, but gcc flagged the null `this` |
 
+### 0006-sidecar-files.patch / 0007-hooks.patch - SC_AI hooks 1-3
+New `McRave/Main/Sidecar.{h,cpp}` plus 35 one-line insertions in 7 files. Off unless
+`SIDECAR_HOST`/`SIDECAR_PORT` or `bwapi-data/sidecar.ini` is present. See `HOOKS_IMPL.md`.
+
 ## Remaining warnings (gcc 13, `-Wall`, 203 lines)
 
 - 182x `backslash-newline at end of file` from `BWEB/Logger.h` and `McRave/Main/Logger.h`
