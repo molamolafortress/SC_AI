@@ -32,6 +32,7 @@ class StrategyCaller:
     _ids: itertools.count = field(default_factory=lambda: itertools.count(1))
     review_after_frame: int | None = None
     budget_exhausted: bool = False
+    _last_engagement_call_frame: int = -10**9
 
     def __post_init__(self) -> None:
         self._prefix = fixed_prefix(self.knowledge)
@@ -56,11 +57,16 @@ class StrategyCaller:
         # Debounce: a burst of intel/building events within min_call_gap_seconds is answered by one call (events stay
         # pending and ride along in the delta); only critical triggers bypass the gap.
         gap = self.cfg.frames(self.cfg.triggers.min_call_gap_seconds)
-        if trigger.startswith("engagement_end"):
-            gap = max(gap, self.cfg.frames(self.cfg.triggers.engagement_min_gap_seconds))
+        frame = self.store.latest.frame
         if (not trigger.startswith(tuple(self.cfg.triggers.critical_triggers))
-                and self.store.latest.frame - self.store.last_call_frame < gap):
+                and frame - self.store.last_call_frame < gap):
             return
+        # At most one engagement-driven call per engagement_min_gap_seconds (skirmish chains otherwise call every 10 s).
+        if trigger.startswith("engagement_end"):
+            if frame - self._last_engagement_call_frame < self.cfg.frames(self.cfg.triggers.engagement_min_gap_seconds):
+                self.store.pending_events = [e for e in self.store.pending_events if not e.startswith("engagement_end")]
+                return
+            self._last_engagement_call_frame = frame
         effort = (self.cfg.models.strategy_effort_transition if self.store.is_transition_trigger(trigger)
                   else self.cfg.models.strategy_effort_regular)
         msg = user_message(self.store, self.ledger, trigger, self.knowledge)

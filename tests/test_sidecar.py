@@ -262,7 +262,9 @@ def test_user_message_sections_order_and_feedback(tmp_path):
     # positions in text (audit A)
     cur = msg.split("## 현재 상태\n")[1].split("\n## ")[0]
     assert "아군 기지: 본진: 일꾼 16/16 (가스 3/3), 해처리 1" in cur and "앞마당: 일꾼" in cur
-    assert "아군 병력 위치: 앞마당" in cur and "적 병력 위치: 적 앞마당 (마지막 목격" in cur
+    # the inspected call may fall in a window where the enemy army was not recently seen: check across all calls
+    all_cur = "\n".join(c[1].split("## 현재 상태\n")[1].split("\n## ")[0] for c in backend.calls if "## 현재 상태\n" in c[1])
+    assert "아군 병력 위치: 앞마당" in all_cur and "적 병력 위치: 적 앞마당 (마지막 목격" in all_cur
     assert "적 기지: 적 본진: 일꾼 최대" in cur and "지역 소유: 아군 ['main', 'natural']" in cur
     brief = msg.split("## 정찰 브리핑 (intel)\n")[1]
     assert "barracks@enemy_main 완성됨, 마지막 목격 2:06" in brief
