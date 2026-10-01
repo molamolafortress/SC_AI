@@ -61,7 +61,9 @@ def run_openbw(cfg: SidecarConfig, args, out_dir: Path) -> None:
             raise SystemExit(f"module not found: {p}")
     port = 8770 + (args.seed % 100)
     env = dict(os.environ, SIDECAR_CONFIG=args.config, SIDECAR_LOGS_DIR=str(cfg.logs_dir))
-    backend = "anthropic" if args.strategy == "llm" else "fake"
+    backend = (args.llm or cfg.llm_backend) if args.strategy == "llm" else "fake"
+    if args.strategy == "llm" and backend == "fake":
+        backend = "claude-cli"
     sidecar = subprocess.Popen([sys.executable, "-m", "bot.sidecar.server", "--config", args.config, "--llm", backend,
                                 "--port", str(port), "--mode", "headless"],
                                env=env, stdout=open(out_dir / "sidecar.out", "w"), stderr=subprocess.STDOUT)
@@ -96,6 +98,7 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--config", default="config/sidecar.yaml")
     ap.add_argument("--parallel", type=int, default=1)
+    ap.add_argument("--llm", default=None, choices=["anthropic", "claude-cli", "fake", "recorded"], help="backend for --strategy llm")
     ap.add_argument("--our-module", default="build/mcrave/McRave.so")
     args = ap.parse_args()
 

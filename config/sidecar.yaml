@@ -1,7 +1,7 @@
 mode: headless          # lockstep | realtime | headless | replay-directive
 host: 127.0.0.1
 port: 8770
-llm_backend: fake       # anthropic | fake | recorded   (set to anthropic once ANTHROPIC_API_KEY is configured)
+llm_backend: claude-cli # anthropic | claude-cli | fake | recorded   (claude-cli uses the Claude Code login, no API key)
 directive_ttl_seconds: 90
 budgets:
   per_game_usd: 3.0

@@ -133,3 +133,55 @@ class RecordedBackend:
         if not self.queue:
             raise LLMUnavailable("recorded directives exhausted")
         return LLMResult(self.queue.pop(0), 0.0, {}, 0.0)
+
+
+class ClaudeCliBackend:
+    """Strategy backend through the Claude Code CLI in headless mode (`claude -p`).
+
+    Uses whatever login the CLI has (a Claude subscription on a developer machine, or the cloud
+    session's credentials), so no API key is needed. Slower than the API (CLI startup, ~2-7 s) and the
+    prompt prefix is cached by the CLI's own 1-hour cache. Structured output via --json-schema.
+    """
+
+    def __init__(self, model: str = "claude-opus-5-5", timeout_s: float = 120.0, cwd: Path | None = None):
+        import tempfile
+
+        self.model = model
+        self.timeout_s = timeout_s
+        self.cwd = cwd or Path(tempfile.mkdtemp(prefix="sc_ai_cli_"))  # empty cwd: no CLAUDE.md, no project context
+        self.schema = json.dumps(Directive.model_json_schema())
+
+    def decide(self, fixed_prefix: str, user_message: str, effort: str) -> LLMResult:
+        import subprocess
+
+        cmd = ["claude", "-p", "--output-format", "json", "--json-schema", self.schema,
+               "--system-prompt", fixed_prefix, "--tools", "", "--model", self.model, "--effort", effort,
+               "--no-session-persistence", "--setting-sources", ""]
+        t0 = time.perf_counter()
+        try:
+            r = subprocess.run(cmd, input=user_message, capture_output=True, text=True, timeout=self.timeout_s, cwd=self.cwd)
+        except subprocess.TimeoutExpired as e:
+            raise LLMUnavailable(f"claude cli timeout after {self.timeout_s}s") from e
+        except FileNotFoundError as e:
+            raise LLMUnavailable("claude cli not found on PATH") from e
+        latency = (time.perf_counter() - t0) * 1000
+        if r.returncode != 0:
+            raise LLMUnavailable(f"claude cli exit {r.returncode}: {r.stderr[-300:]}")
+        try:
+            out = json.loads(r.stdout)
+        except json.JSONDecodeError as e:
+            raise LLMRejected(f"claude cli non-json output: {r.stdout[:200]}") from e
+        data = out.get("structured_output")
+        if data is None:
+            try:
+                data = json.loads(out.get("result", ""))
+            except json.JSONDecodeError as e:
+                raise LLMRejected(f"no structured output: {str(out.get('result'))[:200]}") from e
+        try:
+            d = Directive.model_validate(data)
+        except Exception as e:  # pydantic.ValidationError
+            raise LLMRejected(f"schema validation failed: {e}") from e
+        u = out.get("usage", {}) or {}
+        usage = {k: u.get(k, 0) or 0 for k in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")}
+        cost = float(out.get("total_cost_usd") or estimate_cost(self.model, usage))
+        return LLMResult(d, latency, usage, cost, raw_text=out.get("result", ""))

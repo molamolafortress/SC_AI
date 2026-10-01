@@ -15,6 +15,11 @@ ZERG_REQUIRES: dict[str, str] = {
     "defiler_mound": "hive", "guardian": "greater_spire", "devourer": "greater_spire", "greater_spire": "hive",
     "sunken_colony": "spawning_pool", "spore_colony": "evolution_chamber", "scourge": "spire",
 }
+TECH_ALIASES = {
+    "zergling_speed": "metabolic_boost", "ling_speed": "metabolic_boost", "speed": "metabolic_boost",
+    "hydra_range": "grooved_spines", "hydra_speed": "muscular_augments", "overlord_speed": "pneumatized_carapace",
+    "crack_lings": "adrenal_glands", "hydra_den": "hydralisk_den", "lurker": "lurker_aspect", "mutas": "spire",
+}
 ZERG_UNITS = {"drone", "zergling", "hydralisk", "mutalisk", "lurker", "ultralisk", "defiler", "scourge",
               "guardian", "devourer", "overlord", "queen"}
 
@@ -50,13 +55,20 @@ def validate(d: Directive, knowledge: Knowledge, state: StateSummary | None) -> 
         fixes.append("normalized unit_mix_target to sum 1.0")
     d.unit_mix_target = mix
 
+    d.tech_priority = [TECH_ALIASES.get(t, t) for t in d.tech_priority]
     d.tech_priority = [t for t in d.tech_priority if t in ZERG_REQUIRES or t in ZERG_UNITS or t in {
         "evolution_chamber", "melee_upgrade", "missile_upgrade", "carapace_upgrade", "overlord_speed", "burrow",
         "grooved_spines", "muscular_augments", "adrenal_glands", "pneumatized_carapace"}]
-    for k in list(d.static_defense):
-        if k not in {"sunken", "spore"} or d.static_defense[k] < 0:
+    sd: dict[str, int] = {}
+    for k, v in d.static_defense.items():
+        key = "sunken" if "sunken" in k else ("spore" if "spore" in k else None)
+        if key is None or v < 0:
             fixes.append(f"dropped static_defense '{k}'")
-            d.static_defense.pop(k)
+            continue
+        if key != k:
+            fixes.append(f"static_defense '{k}' -> '{key}'")
+        sd[key] = max(sd.get(key, 0), int(v))
+    d.static_defense = sd
     if not (0.0 <= d.confidence <= 1.0):
         d.confidence = max(0.0, min(1.0, d.confidence))
         fixes.append("clamped confidence")

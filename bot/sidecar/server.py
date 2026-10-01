@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from .config import SidecarConfig
 from .knowledge import Knowledge
-from .llm import AnthropicBackend, Backend, FakeBackend, RecordedBackend
+from .llm import AnthropicBackend, Backend, ClaudeCliBackend, FakeBackend, RecordedBackend
 from .logger import GameLogger
 from .plan_ledger import PlanLedger
 from .schemas import GameEvent, IssuedDirective, StateSummary
@@ -68,6 +68,8 @@ class EndRequest(BaseModel):
 def make_backend(kind: str, cfg: SidecarConfig, recorded_log: str | None = None) -> Backend:
     if kind == "anthropic":
         return AnthropicBackend(model=cfg.models.strategy_model)
+    if kind == "claude-cli":
+        return ClaudeCliBackend(model=cfg.models.strategy_model)
     if kind == "recorded":
         return RecordedBackend(Path(recorded_log))
     return FakeBackend()
@@ -127,7 +129,7 @@ def main() -> None:
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
-    ap.add_argument("--llm", default=None, choices=["anthropic", "fake", "recorded"])
+    ap.add_argument("--llm", default=None, choices=["anthropic", "claude-cli", "fake", "recorded"])
     ap.add_argument("--recorded-log", default=None)
     ap.add_argument("--mode", default=None)
     ap.add_argument("--port", type=int, default=None)
