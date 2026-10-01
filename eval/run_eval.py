@@ -84,10 +84,11 @@ def run_openbw(cfg: SidecarConfig, args, out_dir: Path) -> None:
 
         def one(i: int) -> str:
             run_dir = out_dir / "games" / f"{i:03d}"
+            side = "p2" if (args.alternate_sides and i % 2 == 1) else "p1"
             r = subprocess.run(["tools/run_game_openbw.sh", str(our), str(opp), args.map, "Zerg", opp_race, str(run_dir), f"g{i}"],
-                               env=game_env, capture_output=True, text=True)
+                               env=dict(game_env, OUR_SIDE=side), capture_output=True, text=True)
             line = (r.stdout.strip().splitlines() or ["?"])[-1]
-            print(f"game {i}: {line}", flush=True)
+            print(f"game {i} ({side}): {line}", flush=True)
             return line
 
         with ThreadPoolExecutor(max_workers=args.parallel) as ex:
@@ -107,6 +108,7 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--config", default="config/sidecar.yaml")
     ap.add_argument("--parallel", type=int, default=1)
+    ap.add_argument("--alternate-sides", action="store_true", help="odd games: our bot is player 2 (removes host/start-position bias)")
     ap.add_argument("--max-frames", type=int, default=43200, help="frame cap per game (30 game-minutes); leaving counts as timeout")
     ap.add_argument("--llm", default=None, choices=["anthropic", "claude-cli", "fake", "recorded"], help="backend for --strategy llm")
     ap.add_argument("--our-module", default="build/mcrave/McRave.so")
