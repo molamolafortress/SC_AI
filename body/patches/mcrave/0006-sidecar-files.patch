@@ -1,9 +1,9 @@
 diff --git a/Source/McRave/Main/Sidecar.cpp b/Source/McRave/Main/Sidecar.cpp
 new file mode 100644
-index 0000000..f7c2599
+index 0000000..9ad1a13
 --- /dev/null
 +++ b/Source/McRave/Main/Sidecar.cpp
-@@ -0,0 +1,772 @@
+@@ -0,0 +1,779 @@
 +// Sidecar: SC_AI hooks 1-3 for McRave. See Sidecar.h and body/mcrave_port/HOOKS_IMPL.md.
 +//
 +// The heavy headers (cpp-httplib, nlohmann/json) are confined to this translation unit. They are included before
@@ -493,6 +493,8 @@ index 0000000..f7c2599
 +        if (!config.enabled)
 +            return;
 +        tracker = make_unique<StateTracker>();
++        if (const char* v = std::getenv("SC_AI_LOCKSTEP"); v && *v && *v != '0')
++            config.timeoutMs = max(config.timeoutMs, 180000);   // the sidecar may run the LLM inside the request
 +        client  = make_unique<SidecarClient>(config.host, config.port, config.every, config.timeoutMs);
 +        LOG("Sidecar: enabled, ", config.host, ":", config.port, " every ", config.every, " frames, game_id ", client->gameId());
 +    }
@@ -532,6 +534,11 @@ index 0000000..f7c2599
 +            fillIntel();
 +        }
 +        client->onFrame(*tracker);
++        // Lockstep (SC_AI_LOCKSTEP=1): the game waits while a state post (and, with the sidecar in lockstep mode,
++        // the LLM call it triggers) is in flight. LAN opponents wait too, so decisions land on the frame they were asked for.
++        static bool lockstep = [] { const char* v = std::getenv("SC_AI_LOCKSTEP"); return v && *v && *v != '0'; }();
++        if (lockstep && client->busy() && !client->waitIdle(180000))
++            LOG("Sidecar: lockstep wait timed out at frame ", Broodwar->getFrameCount());
 +        drawStatus();
 +    }
 +

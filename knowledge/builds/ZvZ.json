@@ -3,7 +3,8 @@
   "openings": {
     "9pool_speed": {
       "summary": "Pool at 9, gas, ling speed. Standard ZvZ opener: lings ~1:55, speed ~3:30. Beats 12 hatch, trades evenly with overpool.",
-      "risk": "12 pool muta timing if lings do nothing"
+      "risk": "12 pool muta timing if lings do nothing One-base, economy-poor: only when the enemy is scouted going pool-first/early lings. Against an unknown opponent prefer overpool or 12pool.",
+      "note": "Do not pick this at game start without scouting information."
     },
     "overpool": {
       "summary": "Overlord at 9, pool, hatch after. Balanced: lings ~2:15 with better economy than 9 pool.",

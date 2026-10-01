@@ -7,7 +7,7 @@ budgets:
   per_game_usd: 3.0
   per_day_usd: 30.0
 triggers:
-  safety_interval_seconds: 30
+  safety_interval_seconds: 90
   idle_minerals: 800
   idle_minerals_seconds: 10
   big_engagement_loss_value: 200

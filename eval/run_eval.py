@@ -71,12 +71,12 @@ def run_openbw(cfg: SidecarConfig, args, out_dir: Path) -> None:
     if args.strategy == "llm" and backend == "fake":
         backend = "claude-cli"
     sidecar = subprocess.Popen([sys.executable, "-m", "bot.sidecar.server", "--config", args.config, "--llm", backend,
-                                "--port", str(port), "--mode", "headless"],
+                                "--port", str(port), "--mode", "lockstep" if args.lockstep else "headless"],
                                env=env, stdout=open(out_dir / "sidecar.out", "w"), stderr=subprocess.STDOUT)
     try:
         time.sleep(2)
         game_env = dict(os.environ, SIDECAR_HOST="127.0.0.1", SIDECAR_PORT=str(port), SIDECAR_CONFIG=args.config,
-                        SC_AI_MAX_FRAMES=str(args.max_frames))
+                        SC_AI_MAX_FRAMES=str(args.max_frames), SC_AI_LOCKSTEP="1" if args.lockstep else "0")
         # the sidecar writes logs to cfg.logs_dir; tell it via the config override used by SidecarConfig.load
         game_env["SIDECAR_LOGS_DIR"] = str(cfg.logs_dir)
         if args.opponent in OPPONENT_DATA_DIRS:
@@ -109,6 +109,7 @@ def main() -> None:
     ap.add_argument("--config", default="config/sidecar.yaml")
     ap.add_argument("--parallel", type=int, default=1)
     ap.add_argument("--alternate-sides", action="store_true", help="odd games: our bot is player 2 (removes host/start-position bias)")
+    ap.add_argument("--lockstep", action="store_true", help="game waits for each LLM call (decision lands on the frame it was asked for)")
     ap.add_argument("--max-frames", type=int, default=43200, help="frame cap per game (30 game-minutes); leaving counts as timeout")
     ap.add_argument("--llm", default=None, choices=["anthropic", "claude-cli", "fake", "recorded"], help="backend for --strategy llm")
     ap.add_argument("--our-module", default="build/mcrave/McRave.so")

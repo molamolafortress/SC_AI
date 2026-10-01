@@ -110,6 +110,12 @@ public:
     }
 
     bool connected() const { return connected_.load(); }
+    bool busy() const { std::lock_guard<std::mutex> lk(mu_); return inflight_ || !pending_.empty(); }
+    // Lockstep: block the caller until no post is queued or in flight (the server may run the LLM inside the request).
+    bool waitIdle(int timeoutMs) {
+        std::unique_lock<std::mutex> lk(mu_);
+        return idleCv_.wait_for(lk, std::chrono::milliseconds(timeoutMs), [this] { return !inflight_ && pending_.empty(); });
+    }
     int postsSent() const { return posts_.load(); }
     int postsFailed() const { return failed_.load(); }
 
@@ -128,7 +134,7 @@ private:
     void loop() {
         httplib::Client cli(host_, port_);
         cli.set_connection_timeout(0, timeoutMs_ * 1000);
-        cli.set_read_timeout(timeoutMs_ / 1000 + 1, 0);
+        cli.set_read_timeout(timeoutMs_ / 1000 + 1, (timeoutMs_ % 1000) * 1000);
         cli.set_keep_alive(true);
         while (true) {
             std::string payload;
@@ -137,20 +143,26 @@ private:
                 cv_.wait(lk, [this] { return stop_ || !pending_.empty(); });
                 if (stop_ && pending_.empty()) return;
                 payload.swap(pending_);
+                inflight_ = true;
             }
             auto res = cli.Post("/state", payload, "application/json");
-            if (!res || res->status != 200) {
-                failed_++;
-                connected_ = false;
-                continue;
+            {
+                std::lock_guard<std::mutex> lk(mu_);
+                if (!res || res->status != 200) {
+                    failed_++;
+                    connected_ = false;
+                } else {
+                    posts_++;
+                    connected_ = true;
+                    auto j = nlohmann::json::parse(res->body, nullptr, false);
+                    if (!j.is_discarded()) {
+                        auto d = Directive::fromJson(j.value("directive", nlohmann::json()));
+                        if (d) directive_ = d;
+                    }
+                }
+                inflight_ = false;
             }
-            posts_++;
-            connected_ = true;
-            auto j = nlohmann::json::parse(res->body, nullptr, false);
-            if (j.is_discarded()) continue;
-            auto d = Directive::fromJson(j.value("directive", nlohmann::json()));
-            std::lock_guard<std::mutex> lk(mu_);
-            if (d) directive_ = d;
+            idleCv_.notify_all();
         }
     }
 
@@ -179,6 +191,8 @@ private:
     mutable std::mutex mu_;
     std::condition_variable cv_;
     std::string pending_;
+    bool inflight_ = false;
+    std::condition_variable idleCv_;
     int pendingFrame_ = 0;
     bool stop_ = false;
     std::optional<Directive> directive_;
