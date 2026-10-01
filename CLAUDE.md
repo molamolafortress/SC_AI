@@ -17,9 +17,14 @@ python -m pytest -q                 # unit + end-to-end (fake LLM) tests, must p
 python -m bot.sidecar.server --config config/sidecar.yaml --llm fake     # sidecar on 127.0.0.1:8770
 python -m tools.fake_body --minutes 8                                    # drive it, prints directives
 python -m eval.run_eval --games 30 --strategy fixed --runner mock        # metrics.json under eval/results/
+python -m eval.run_eval --runner openbw --games 3 --parallel 3 --opponent zzzkbot --strategy fixed   # real games, baseline body
+python -m eval.run_eval --runner openbw --games 3 --parallel 3 --opponent mcrave --strategy llm --llm claude-cli
 python -m eval.compare eval/results/<a>/metrics.json eval/results/<b>/metrics.json
 ```
-Real LLM: set `ANTHROPIC_API_KEY` (never commit it) and `--llm anthropic`. Budget caps live in `config/sidecar.yaml`.
+Opponents (`eval/run_eval.py` OPPONENTS): `probe` (idle), `mcrave` (pristine body), `zzzkbot`, `ualbertabot`. Real games need
+`third_party/game-data` (MPQs + maps, see `docs/setup_openbw.md` §7) and the built bots (`build/*/*.so`, see `body/*_port/README.md`).
+`--strategy fixed` runs the sidecar in observe-only mode (logs, no overrides); `--max-frames` caps games (timeout = not a win).
+LLM backends: `claude-cli` (Claude Code login, no key; default), `anthropic` (needs `ANTHROPIC_API_KEY` in the environment, never in chat or git), `fake`, `recorded`. Budget caps live in `config/sidecar.yaml`.
 
 ## Rules
 - The body must play a full game without the sidecar. Never make the body wait on HTTP.
