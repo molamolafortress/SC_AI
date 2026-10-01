@@ -69,8 +69,6 @@ def run_openbw(cfg: SidecarConfig, args, out_dir: Path) -> None:
     port = 8770 + (args.seed % 100)
     env = dict(os.environ, SIDECAR_CONFIG=args.config, SIDECAR_LOGS_DIR=str(cfg.logs_dir))
     backend = (args.llm or cfg.llm_backend) if args.strategy == "llm" else "observe"
-    if args.strategy == "llm" and backend == "fake":
-        backend = "claude-cli"
     sidecar = subprocess.Popen([sys.executable, "-m", "bot.sidecar.server", "--config", args.config, "--llm", backend,
                                 "--port", str(port), "--mode", "lockstep" if args.lockstep else "headless"],
                                env=env, stdout=open(out_dir / "sidecar.out", "w"), stderr=subprocess.STDOUT)

@@ -1,9 +1,9 @@
 diff --git a/Source/McRave/Main/Sidecar.cpp b/Source/McRave/Main/Sidecar.cpp
 new file mode 100644
-index 0000000..9ad1a13
+index 0000000..884cfeb
 --- /dev/null
 +++ b/Source/McRave/Main/Sidecar.cpp
-@@ -0,0 +1,779 @@
+@@ -0,0 +1,1328 @@
 +// Sidecar: SC_AI hooks 1-3 for McRave. See Sidecar.h and body/mcrave_port/HOOKS_IMPL.md.
 +//
 +// The heavy headers (cpp-httplib, nlohmann/json) are confined to this translation unit. They are included before
@@ -15,9 +15,11 @@ index 0000000..9ad1a13
 +#include <algorithm>
 +#include <cctype>
 +#include <cstdlib>
++#include <deque>
 +#include <fstream>
 +#include <memory>
 +#include <set>
++#include <sstream>
 +#include <string>
 +
 +#include "Builds/All/All.h"
@@ -25,9 +27,11 @@ index 0000000..9ad1a13
 +#include "Builds/All/Learning.h"
 +#include "Info/Player/PlayerInfo.h"
 +#include "Info/Player/Players.h"
++#include "Info/Resource/Resources.h"
 +#include "Info/Unit/UnitInfo.h"
 +#include "Info/Unit/Units.h"
 +#include "Main/Common.h"
++#include "Macro/Expanding/Expanding.h"
 +#include "Main/Logger.h"
 +#include "Map/Stations/Stations.h"
 +#include "Map/Terrain/Terrain.h"
@@ -266,6 +270,391 @@ index 0000000..9ad1a13
 +        bool isAttackObjective(const string &type) { return type == "attack" || type == "contain" || type == "harass"; }
 +        bool isDefendObjective(const string &type) { return type == "defend" || type == "hold"; }
 +
++        // ---- item A: named regions ------------------------------------------------------------------------------
++        // Built on the first emit frame (Terrain/Stations/Walls are initialised after Sidecar::onStart) and refreshed on
++        // every emit (owner flags, enemy_* once scouted, third/fourth from McRave's expansion order). ~10 entries.
++        struct Region {
++            string name;
++            Position pos;
++            string owner;
++        };
++        vector<Region> regions;
++        const int regionRadius = 12 * 32; // px: nearest named region within this radius, else BWEM area fallback
++
++        string ownerOf(const BWEB::Station *s)
++        {
++            if (!s) return "none";
++            auto o = Stations::ownedBy(s);
++            return o == PlayerState::Self ? "me" : o == PlayerState::Enemy ? "enemy" : "none";
++        }
++
++        string typeName(UnitType t)
++        {
++            string n = t.getName();
++            auto us  = n.find('_');
++            if (us != string::npos && (n.rfind("Terran_", 0) == 0 || n.rfind("Zerg_", 0) == 0 || n.rfind("Protoss_", 0) == 0)) n = n.substr(us + 1);
++            return norm(n);
++        }
++
++        void buildRegions()
++        {
++            regions.clear();
++            auto add = [&](const string &name, Position p, const string &owner) {
++                if (p.isValid()) regions.push_back({name, p, owner});
++            };
++            auto myMain = Terrain::getMyMain(), myNat = Terrain::getMyNatural();
++            auto enMain = Terrain::getEnemyMain(), enNat = Terrain::getEnemyNatural();
++            if (myMain) add("main", myMain->getBase()->Center(), ownerOf(myMain));
++            if (myNat) add("natural", myNat->getBase()->Center(), ownerOf(myNat));
++
++            // third/fourth: McRave's expansion order (Expansion::onFrame; main and natural come first), fallback by ground distance from the natural
++            vector<const BWEB::Station *> extra;
++            for (auto s : Expansion::getExpandOrder())
++                if (s && s != myMain && s != myNat && s != enMain && s != enNat) extra.push_back(s);
++            if (extra.empty() && (myNat || myMain)) {
++                auto from = myNat ? myNat->getBase()->Center() : myMain->getBase()->Center();
++                vector<pair<double, const BWEB::Station *>> cand;
++                for (auto &s : BWEB::Stations::getStations()) {
++                    if (&s == myMain || &s == myNat || &s == enMain || &s == enNat || s.isMain()) continue;
++                    auto d = BWEB::Map::getGroundDistance(from, s.getBase()->Center());
++                    if (d < 1e9) cand.push_back({d, &s});
++                }
++                sort(cand.begin(), cand.end(), [](auto &a, auto &b) { return a.first < b.first; });
++                for (auto &[d, s] : cand) extra.push_back(s);
++            }
++            if (extra.size() > 0) add("third", extra[0]->getBase()->Center(), ownerOf(extra[0]));
++            if (extra.size() > 1) add("fourth", extra[1]->getBase()->Center(), ownerOf(extra[1]));
++
++            if (enMain) add("enemy_main", enMain->getBase()->Center(), ownerOf(enMain));
++            if (enNat) add("enemy_natural", enNat->getBase()->Center(), ownerOf(enNat));
++            for (auto s : Stations::getStations(PlayerState::Enemy)) {
++                if (s == enMain || s == enNat) continue;
++                add("enemy_third", s->getBase()->Center(), "enemy");
++                break;
++            }
++            add("center", Position(mapBWEM.Center()), "none");
++            if (myMain && enMain) {
++                int length = 0;
++                auto &path = mapBWEM.GetPath(myMain->getBase()->Center(), enMain->getBase()->Center(), &length);
++                if (!path.empty()) add("path_mid", Position(path[path.size() / 2]->Center()), "none");
++                else add("path_mid", (myMain->getBase()->Center() + enMain->getBase()->Center()) / 2, "none");
++            }
++        }
++
++        nlohmann::json regionsJson()
++        {
++            nlohmann::json j = nlohmann::json::object();
++            for (auto &r : regions) {
++                auto t    = TilePosition(r.pos);
++                j[r.name] = {{"tile", {t.x, t.y}}, {"owner", r.owner}};
++            }
++            return j;
++        }
++
++        string regionName(Position p)
++        {
++            if (!p.isValid()) return "unknown";
++            double best = DBL_MAX;
++            const Region *bestR = nullptr;
++            for (auto &r : regions) {
++                auto d = r.pos.getDistance(p);
++                if (d < best) { best = d; bestR = &r; }
++            }
++            if (bestR && best <= regionRadius) return bestR->name;
++            auto area = mapBWEM.GetNearestArea(WalkPosition(p));
++            return area ? "unknown_area_" + to_string(area->Id()) : "unknown";
++        }
++
++        // ---- item A: our bases, production ----------------------------------------------------------------------
++        const BWEB::Station *closestOwnStation(Position p)
++        {
++            const BWEB::Station *best = nullptr;
++            double bestD = DBL_MAX;
++            for (auto s : Stations::getStations(PlayerState::Self)) {
++                auto d = s->getBase()->Center().getDistance(p);
++                if (d < bestD) { bestD = d; best = s; }
++            }
++            return bestD <= 10 * 32 ? best : nullptr;
++        }
++
++        void fillMyBases()
++        {
++            nlohmann::json bases = nlohmann::json::array();
++            map<const BWEB::Station *, int> hatch;
++            for (auto u : Broodwar->self()->getUnits()) {
++                if (u->exists() && u->getType().isResourceDepot())
++                    if (auto s = closestOwnStation(u->getPosition())) hatch[s]++;
++            }
++            for (auto s : Stations::getStations(PlayerState::Self)) {
++                int wm = 0, wg = 0, patches = 0, geysers = 0;
++                for (auto &m : Resources::getMyMinerals())
++                    if (m->getStation() == s) { patches++; wm += m->getGathererCount(); }
++                for (auto &g : Resources::getMyGas())
++                    if (g->getStation() == s) { geysers++; wg += g->getGathererCount(); }
++                bases.push_back({{"name", regionName(s->getBase()->Center())}, {"workers_minerals", wm}, {"workers_gas", wg}, {"mineral_patches", patches},
++                                 {"gas_geysers", geysers}, {"saturation", patches > 0 ? min(1.0, double(wm) / (2.0 * patches)) : 0.0}, {"hatcheries", hatch[s]}});
++            }
++            tracker->meExtra["bases"] = bases;
++
++            nlohmann::json inProgress = nlohmann::json::object();
++            int larva = 0;
++            auto bump = [&](UnitType t) {
++                if (t == UnitTypes::None || t == UnitTypes::Unknown) return;
++                auto n = typeName(t);
++                inProgress[n] = inProgress.value(n, 0) + 1;
++            };
++            for (auto u : Broodwar->self()->getUnits()) {
++                if (!u->exists()) continue;
++                auto t = u->getType();
++                if (t == Zerg_Larva) { larva++; continue; }
++                if (t == Zerg_Egg || t == Zerg_Cocoon) { bump(u->getBuildType()); continue; }
++                if (t == Zerg_Lurker_Egg) { bump(Zerg_Lurker); continue; }
++                if (u->isMorphing() && t.isBuilding()) { bump(u->getBuildType()); continue; }
++                if (t.isBuilding() && !u->isCompleted()) bump(t);
++            }
++            tracker->meExtra["production"] = {{"in_progress", inProgress}, {"larva", larva}};
++        }
++
++        // ---- item B: execution feedback -------------------------------------------------------------------------
++        struct OverrideStatus {
++            bool applied = false;
++            string before, after, note;
++        };
++        map<string, OverrideStatus> overrides;   // current status per directive field (cleared when the directive changes)
++        map<string, string> overrideLogged;      // last logged before/after pair per field
++        string overridesForId;                   // directive id the statuses belong to
++        int directiveStartDrones = -1;           // drone count when the current directive id was first seen
++
++        void recordOverride(const string &field, bool applied, const string &before, const string &after, const string &note = "")
++        {
++            overrides[field] = {applied, before, after, note};
++            auto key         = (applied ? "A|" : "S|") + before + "|" + after + "|" + note;
++            auto &last       = overrideLogged[field];
++            if (last != key) {
++                last = key;
++                LOG("Sidecar: override ", field, applied ? " applied: " : " not applied: ", before, " -> ", after, note.empty() ? "" : " (" + note + ")");
++            }
++        }
++
++        string compositionString(const map<UnitType, double> &mix)
++        {
++            string out;
++            for (auto &[t, w] : mix) {
++                char buf[32];
++                snprintf(buf, sizeof buf, ":%.2f", w);
++                out += (out.empty() ? "" : ",") + typeName(t) + buf;
++            }
++            return out.empty() ? "none" : out;
++        }
++
++        string typeListString(const vector<UnitType> &list)
++        {
++            string out;
++            for (auto &t : list) out += (out.empty() ? "" : ",") + typeName(t);
++            return out.empty() ? "none" : out;
++        }
++
++        void fillExecution()
++        {
++            auto &d = directive();
++            if (d && d->static_defense.size() && overrides.lower_bound("static_defense") == overrides.end())
++                recordOverride("static_defense", false, "", "", "no natural wall or natural station of ours yet");
++            nlohmann::json ov = nlohmann::json::array();
++            for (auto &[field, o] : overrides)   // "static_defense.sunken" / ".spore" are two entries of field "static_defense"
++                ov.push_back({{"field", field.substr(0, field.find('.'))}, {"applied", o.applied}, {"before", o.before}, {"after", o.after}, {"note", o.note}});
++
++            nlohmann::json army = nlohmann::json::object();
++            int sunken = 0, spore = 0, drones = 0;
++            for (auto u : Broodwar->self()->getUnits()) {
++                if (!u->exists()) continue;
++                auto t = u->getType();
++                if (t == Zerg_Sunken_Colony || (t == Zerg_Creep_Colony && u->getBuildType() == Zerg_Sunken_Colony)) sunken++;
++                if (t == Zerg_Spore_Colony || (t == Zerg_Creep_Colony && u->getBuildType() == Zerg_Spore_Colony)) spore++;
++                if (t == Zerg_Drone) drones++;
++                if (isZergArmyType(t)) { auto n = typeName(t); army[n] = army.value(n, 0) + 1; }
++            }
++            if (directiveStartDrones < 0 && d) directiveStartDrones = drones;
++            tracker->executionExtra["overrides"] = ov;
++            tracker->executionExtra["results"]   = {{"sunken", sunken}, {"spore", spore}, {"army_actual", army}, {"drones", drones},
++                                                    {"drone_delta_since_directive", directiveStartDrones >= 0 ? drones - directiveStartDrones : 0}};
++        }
++
++        // ---- item C: engagement events (10 s sliding loss window) ----------------------------------------------
++        struct Loss {
++            int frame;
++            bool mine;
++            int value;
++            string name;
++            Position pos;
++        };
++        deque<Loss> lossWindow;
++        const int lossWindowFrames = 240, engagementThreshold = 150, engagementQuietFrames = 120;
++        bool inEngagement = false;
++        int engagementStart = 0, lastLossFrame = 0, engMyValue = 0, engEnemyValue = 0, engN = 0;
++        long long engX = 0, engY = 0;
++        map<string, int> engMyLosses, engEnemyLosses;
++
++        int lossValue(UnitType t)
++        {
++            int v = t.mineralPrice() + t.gasPrice();
++            if (t.isTwoUnitsInOneEgg()) v /= 2;
++            return v;
++        }
++
++        void addToEngagement(const Loss &l)
++        {
++            (l.mine ? engMyLosses : engEnemyLosses)[l.name]++;
++            (l.mine ? engMyValue : engEnemyValue) += l.value;
++            engX += l.pos.x, engY += l.pos.y, engN++;
++            lastLossFrame = max(lastLossFrame, l.frame);
++        }
++
++        void resetEngagement()
++        {
++            inEngagement = false;
++            engMyValue = engEnemyValue = engN = 0;
++            engX = engY = 0;
++            engMyLosses.clear(), engEnemyLosses.clear();
++        }
++
++        void updateEngagement()
++        {
++            const int frame = Broodwar->getFrameCount();
++            while (!lossWindow.empty() && lossWindow.front().frame < frame - lossWindowFrames) lossWindow.pop_front();
++            if (!inEngagement) {
++                int total = 0;
++                for (auto &l : lossWindow) total += l.value;
++                if (total <= engagementThreshold) return;
++                inEngagement    = true;
++                engagementStart = frame;
++                for (auto &l : lossWindow) addToEngagement(l);
++                auto where = regionName(Position(int(engX / engN), int(engY / engN)));
++                tracker->pushEvent("engagement_start", where, {{"my_losses", engMyLosses}, {"enemy_losses", engEnemyLosses}, {"my_value", engMyValue}, {"enemy_value", engEnemyValue}});
++                LOG("Sidecar: engagement_start at ", where, " my ", engMyValue, " enemy ", engEnemyValue);
++            }
++            else if (frame - lastLossFrame > engagementQuietFrames) {
++                double ratio = engMyValue > 0 ? double(engEnemyValue) / engMyValue : (engEnemyValue > 0 ? 99.0 : 1.0);
++                string outcome = ratio < 0.7 ? "lost" : ratio > 1.4 ? "won" : "even";
++                auto where = regionName(Position(int(engX / engN), int(engY / engN)));
++                tracker->pushEvent("engagement_end", where, {{"my_losses", engMyLosses}, {"enemy_losses", engEnemyLosses}, {"my_value", engMyValue}, {"enemy_value", engEnemyValue},
++                                                             {"ratio", ratio}, {"outcome", outcome}, {"start_frame", engagementStart}, {"end_frame", lastLossFrame}});
++                LOG("Sidecar: engagement_end at ", where, " ", outcome, " my ", engMyValue, " enemy ", engEnemyValue);
++                resetEngagement();
++                lossWindow.clear();
++            }
++        }
++
++        // ---- item E: map dump (SC_AI_MAP_DUMP=<path>) then leave ----------------------------------------------
++        nlohmann::json tileJ(TilePosition t) { return {t.x, t.y}; }
++        nlohmann::json tileSetJ(const set<TilePosition> &tiles)
++        {
++            nlohmann::json a = nlohmann::json::array();
++            for (auto &t : tiles) a.push_back(tileJ(t));
++            return a;
++        }
++        nlohmann::json wallJ(BWEB::Wall *wall)
++        {
++            if (!wall) return nullptr;
++            nlohmann::json buildings = nlohmann::json::array(), defenses = nlohmann::json::array();
++            for (auto &t : wall->getRawBuildings()) buildings.push_back(typeName(t));
++            for (auto &t : wall->getRawDefenses()) defenses.push_back(typeName(t));
++            nlohmann::json defRows = nlohmann::json::array();
++            for (int row = 0; row < 3; row++) {
++                if (wall->getDefenses(row).empty()) break;
++                defRows.push_back(tileSetJ(wall->getDefenses(row)));
++            }
++            return {{"choke_tile", wall->getChokePoint() ? tileJ(TilePosition(Position(wall->getChokePoint()->Center()))) : nlohmann::json(nullptr)},
++                    {"station_region", wall->getStation() ? regionName(wall->getStation()->getBase()->Center()) : "unknown"},
++                    {"buildings", buildings}, {"defense_types", defenses},
++                    {"large_tiles", tileSetJ(wall->getLargeTiles())}, {"medium_tiles", tileSetJ(wall->getMediumTiles())}, {"small_tiles", tileSetJ(wall->getSmallTiles())},
++                    {"openings", tileSetJ(wall->getOpenings())}, {"defense_tiles_by_row", defRows},
++                    {"ground_defense_count_planned", wall->getGroundDefenseCount()},
++                    {"open_wall", true},   // McRave::Walls::findWalls() creates every natural wall with openWall = true
++                    {"zergling_tight", nullptr}, // BWEB::Wall keeps tightType/requireTight private; McRave builds Zerg walls with tight = false
++                    {"note", "McRave Zerg natural walls are open (tight=false, openWall=true): not zergling-tight by construction"}};
++        }
++
++        void writeMapDump(const string &path)
++        {
++            nlohmann::json j;
++            j["map"]      = Broodwar->mapName();
++            j["map_file"] = Broodwar->mapFileName();
++            j["size_tiles"] = {Broodwar->mapWidth(), Broodwar->mapHeight()};
++            j["our_start_tile"] = tileJ(Broodwar->self()->getStartLocation());
++            nlohmann::json starts = nlohmann::json::array();
++            for (auto &t : Broodwar->getStartLocations()) starts.push_back(tileJ(t));
++            j["start_locations"] = starts;
++            // "regions" in the converter's format (tools/map_knowledge_from_dump.py: {name: [x, y]}); owners in "regions_detail".
++            nlohmann::json regionsFlat = nlohmann::json::object();
++            for (auto &r : regions) { auto t = TilePosition(r.pos); regionsFlat[r.name] = {t.x, t.y}; }
++            j["regions"]        = regionsFlat;
++            j["regions_detail"] = regionsJson();
++
++            auto myMain = Terrain::getMyMain();
++            nlohmann::json bases = nlohmann::json::array();
++            for (auto &s : BWEB::Stations::getStations()) {
++                auto base = s.getBase();
++                int mineralsTotal = 0;
++                for (auto m : base->Minerals()) mineralsTotal += m->InitialAmount();
++                int gasTotal = 0;
++                for (auto g : base->Geysers()) gasTotal += g->InitialAmount();
++                auto gd = myMain ? BWEB::Map::getGroundDistance(myMain->getBase()->Center(), base->Center()) : DBL_MAX;
++                bases.push_back({{"tile", tileJ(base->Location())}, {"center_tile", tileJ(TilePosition(base->Center()))}, {"minerals", int(base->Minerals().size())},
++                                 {"minerals_total", mineralsTotal}, {"gas", int(base->Geysers().size())}, {"gas_total", gasTotal}, {"isStart", base->Starting()},
++                                 {"is_main", s.isMain()}, {"is_natural", s.isNatural()}, {"area_id", base->GetArea() ? base->GetArea()->Id() : -1},
++                                 {"region", regionName(base->Center())}, {"owner", ownerOf(&s)},
++                                 {"ground_distance_from_main", gd < 1e9 ? nlohmann::json(int(gd)) : nlohmann::json(nullptr)},
++                                 {"defense_tiles", tileSetJ(s.getDefenses())}});
++            }
++            j["bases"] = bases;
++
++            nlohmann::json chokes = nlohmann::json::array();
++            set<const BWEM::ChokePoint *> seen;
++            for (auto &area : mapBWEM.Areas()) {
++                for (auto cp : area.ChokePoints()) {
++                    if (!seen.insert(cp).second) continue;
++                    auto ct = TilePosition(Position(cp->Center()));
++                    chokes.push_back({{"center", tileJ(ct)}, {"center_tile", tileJ(ct)}, {"width", cp->Width()}, {"width_tiles", cp->Width() / 32},
++                                      {"areas", {cp->GetAreas().first->Id(), cp->GetAreas().second->Id()}}, {"blocked", cp->Blocked()},
++                                      {"is_main_choke", cp == Terrain::getMainChoke()}, {"is_natural_choke", cp == Terrain::getNaturalChoke()},
++                                      {"region", regionName(Position(cp->Center()))}});
++                }
++            }
++            j["chokes"] = chokes;
++
++            j["wall_natural"] = wallJ(Walls::getNaturalWall());
++            j["wall_main"]    = wallJ(Walls::getMainWall());
++            // Converter keys: "natural_wall" {buildings, tiles (all wall building tiles), zergling_tight}, "natural_defenses" [[x, y], ...]
++            // (BWEB defense tiles of the natural station, then the wall's first defense row).
++            auto nat = Terrain::getMyNatural();
++            if (auto wall = Walls::getNaturalWall()) {
++                nlohmann::json tiles = nlohmann::json::array();
++                for (auto &t : wall->getLargeTiles()) tiles.push_back(tileJ(t));
++                for (auto &t : wall->getMediumTiles()) tiles.push_back(tileJ(t));
++                for (auto &t : wall->getSmallTiles()) tiles.push_back(tileJ(t));
++                j["natural_wall"] = {{"buildings", j["wall_natural"]["buildings"]}, {"tiles", tiles}, {"zergling_tight", false}, {"open_wall", true}};
++            }
++            else
++                j["natural_wall"] = nullptr;
++            nlohmann::json natDef = nlohmann::json::array();
++            if (nat) {
++                for (auto &t : nat->getDefenses()) natDef.push_back(tileJ(t));
++                if (auto wall = Walls::getNaturalWall()) for (auto &t : wall->getDefenses(0)) natDef.push_back(tileJ(t));
++            }
++            j["natural_defenses"] = natDef;
++            j["natural_detail"]   = nat ? nlohmann::json({{"station_defense_tiles", tileSetJ(nat->getDefenses())},
++                                                          {"pocket_defense_tile", nat->getPocketDefense().isValid() ? tileJ(nat->getPocketDefense()) : nlohmann::json(nullptr)},
++                                                          {"defend_position_tile", tileJ(TilePosition(Stations::getDefendPosition(nat)))}})
++                                        : nlohmann::json(nullptr);
++            nlohmann::json order = nlohmann::json::array();
++            for (auto s : Expansion::getExpandOrder()) order.push_back({{"tile", tileJ(s->getBase()->Location())}, {"region", regionName(s->getBase()->Center())}});
++            j["expand_order"] = order;
++
++            ofstream f(path);
++            f << j.dump(2) << endl;
++            LOG("Sidecar: map dump written to ", path, " (", bases.size(), " bases, ", chokes.size(), " chokes), leaving game");
++        }
++
 +        // ---- hook 2 payload extras -----------------------------------------------------------------------------
 +        void fillCombatSim()
 +        {
@@ -326,6 +715,18 @@ index 0000000..9ad1a13
 +            int count = 0, firstSeen = -1, started = -1, completes = -1;
 +        };
 +        map<string, BuildingIntel> buildingIntel; // merged across frames so destroyed/forgotten buildings keep their timings
++        struct BuildingPos {
++            TilePosition tile = TilePositions::Invalid;
++            double progress = 0.0;
++            int completes = -1, lastSeen = -1;
++            bool completed = false;
++        };
++        map<Unit, BuildingPos> buildingPos;
++        struct EnemyBase {
++            int workersMax = 0, hatcheries = 0, lastSeen = -1;
++            string region; // named region at first sight, kept after the station is lost (enemy_main stays enemy_main)
++        };
++        map<const BWEB::Station *, EnemyBase> enemyBases;
 +        int mainScoutedFrame = -1, natScoutedFrame = -1, gasFirstSeen = -1, armyFirstSeen = -1, workersSeenMax = 0;
 +
 +        string timeStr(int frame) { return frame < 0 ? string("?") : Time(frame).toString(); }
@@ -401,17 +802,66 @@ index 0000000..9ad1a13
 +                if (unit.frameCompletesWhen() > 0 && (bi.completes < 0 || unit.frameCompletesWhen() < bi.completes)) bi.completes = unit.frameCompletesWhen();
 +                if (bi.firstSeen < 0) bi.firstSeen = frame;
 +            }
++            // Per-building positions (item A): region name, tile, progress (BWAPI remaining build time while visible, else the
++            // last value / McRave's health-based estimate), completion time, last seen. Keyed by BWAPI unit so unseen buildings keep their last state.
++            map<string, nlohmann::json> positions;
++            for (auto &u : Units::getUnits(PlayerState::Enemy)) {
++                auto &unit = *u;
++                if (!unit.getType().isBuilding() || !unit.unit())
++                    continue;
++                auto &bp = buildingPos[unit.unit()];
++                bp.tile  = unit.getTilePosition();
++                if (unit.unit()->exists()) {
++                    auto bt      = unit.getType().buildTime();
++                    bp.completed = unit.unit()->isCompleted();
++                    bp.progress  = bp.completed ? 1.0 : (bt > 0 ? max(0.0, 1.0 - double(unit.unit()->getRemainingBuildTime()) / bt) : 0.0);
++                    bp.completes = bp.completed ? -1 : frame + unit.unit()->getRemainingBuildTime();
++                    bp.lastSeen  = frame;
++                }
++                else {
++                    bp.lastSeen = max(bp.lastSeen, unit.getLastVisibleFrame());
++                    if (!bp.completed) {
++                        if (bp.completes < 0 && unit.frameCompletesWhen() > 0) bp.completes = unit.frameCompletesWhen();
++                        if (bp.completes >= 0 && frame >= bp.completes) { bp.completed = true; bp.progress = 1.0; bp.completes = -1; }
++                        else if (bp.completes >= 0 && unit.frameStartedWhen() > 0 && bp.completes > unit.frameStartedWhen())
++                            bp.progress = max(bp.progress, min(1.0, double(frame - unit.frameStartedWhen()) / (bp.completes - unit.frameStartedWhen())));
++                    }
++                }
++                positions[typeName(unit.getType())].push_back({{"region", regionName(unit.getPosition())}, {"tile", {bp.tile.x, bp.tile.y}}, {"progress", bp.progress},
++                                                               {"completes_time", timeStr(bp.completes)},   // "?" once completed / unknown (schema: str)
++                                                               {"last_seen_time", timeStr(bp.lastSeen)}});
++            }
 +            nlohmann::json buildings = nlohmann::json::object();
 +            int gasCount = 0;
 +            for (auto &[name, bi] : buildingIntel) {
 +                buildings[name] = {{"count", bi.count}, {"first_seen_frame", bi.firstSeen}, {"started_frame", bi.started}, {"started_time", timeStr(bi.started)},
-+                                   {"completes_frame", bi.completes}, {"completes_time", timeStr(bi.completes)}};
++                                   {"completes_frame", bi.completes}, {"completes_time", timeStr(bi.completes)},
++                                   {"positions", positions.count(name) ? positions[name] : nlohmann::json::array()}};
 +                if (isGasName(name)) {
 +                    gasCount += bi.count;
 +                    if (gasFirstSeen < 0 && bi.count > 0) gasFirstSeen = bi.firstSeen;
 +                }
 +            }
 +            j["buildings"] = buildings;
++
++            // Enemy bases (item A): McRave's enemy stations; workers counted by proximity (10 tiles) while visible, max kept.
++            for (auto s : Stations::getStations(PlayerState::Enemy)) {
++                auto &eb    = enemyBases[s];
++                eb.lastSeen = max(eb.lastSeen, Stations::lastVisible(s));
++                if (eb.region.empty() || eb.region.rfind("unknown", 0) == 0) eb.region = regionName(s->getBase()->Center());
++                int workers = 0, hatch = 0;
++                for (auto u : Broodwar->enemy()->getUnits())
++                    if (u->exists() && u->getType().isWorker() && u->getPosition().getDistance(s->getBase()->Center()) <= 10 * 32) workers++;
++                for (auto &u : Units::getUnits(PlayerState::Enemy))
++                    if (u->getType().isResourceDepot() && u->getPosition().getDistance(s->getBase()->Center()) <= 10 * 32) hatch++;
++                eb.workersMax = max(eb.workersMax, workers);
++                eb.hatcheries = hatch;
++            }
++            nlohmann::json ebJ = nlohmann::json::array();
++            for (auto &[s, eb] : enemyBases)
++                ebJ.push_back({{"region", eb.region}, {"workers_seen_max", eb.workersMax}, {"last_seen_time", timeStr(eb.lastSeen)},
++                               {"hatcheries", eb.hatcheries}, {"owner", ownerOf(s)}});
++            j["enemy_bases"] = ebJ;
 +
 +            // 3. Workers, gas, expansions.
 +            int workers = 0;
@@ -515,6 +965,14 @@ index 0000000..9ad1a13
 +        current = client->directive();
 +        if (current && !current->valid(frame))
 +            current.reset();
++        {
++            const string id = (current && !current->observe_only) ? current->directive_id : "";
++            if (id != overridesForId) {
++                overridesForId = id;
++                overrides.clear();   // statuses belong to one directive id; overrideLogged is kept so a repeated identical status is not re-logged
++                directiveStartDrones = -1;
++            }
++        }
 +        if (current && current->directive_id != lastLoggedId) {
 +            lastLoggedId = current->directive_id;
 +            LOG("Sidecar: directive ", current->directive_id, " opening=", current->opening, " stance=", current->stance, " expand=", current->expand_policy,
@@ -524,14 +982,31 @@ index 0000000..9ad1a13
 +
 +    void emitIfDue()
 +    {
++        // Item E: SC_AI_MAP_DUMP=<path>: dump BWEM/BWEB map knowledge on the first frame (all managers initialised) and leave.
++        static const string mapDumpPath = [] { const char *v = std::getenv("SC_AI_MAP_DUMP"); return v ? string(v) : string(); }();
++        static bool mapDumped = false;
++        if (!mapDumpPath.empty() && !mapDumped) {
++            mapDumped = true;
++            buildRegions();
++            writeMapDump(mapDumpPath);
++            Broodwar->leaveGame();
++            return;
++        }
 +        if (!enabled())
 +            return;
 +        meterCommands();
++        if (!tracker->regionNamer)
++            tracker->regionNamer = [](Position p) { return regionName(p); };
 +        tracker->update();
++        updateEngagement();
 +        if (Broodwar->getFrameCount() % config.every == 0 || tracker->hasPendingEvents()) {
++            buildRegions();
++            tracker->regions = regionsJson();
 +            fillCombatSim();
 +            fillBodyDefaults();
 +            fillIntel();
++            fillMyBases();
++            fillExecution();
 +        }
 +        client->onFrame(*tracker);
 +        // Lockstep (SC_AI_LOCKSTEP=1): the game waits while a state post (and, with the sidecar in lockstep mode,
@@ -555,6 +1030,16 @@ index 0000000..9ad1a13
 +        tracker->onUnitDestroy(unit);
 +        if (unit->getPlayer() == Broodwar->self() && unit->getType().isBuilding())
 +            tracker->pushEvent("my_building_lost", unit->getType().getName());
++        // Item C: loss window for engagement detection (resource value; larva/eggs/broodlings are free and skipped)
++        const bool mine = unit->getPlayer() == Broodwar->self(), theirs = unit->getPlayer() == Broodwar->enemy();
++        if ((mine || theirs) && unit->getType() != Zerg_Larva && unit->getType() != Zerg_Egg && unit->getType() != Zerg_Lurker_Egg && unit->getType() != Zerg_Cocoon) {
++            auto v = lossValue(unit->getType());
++            if (v > 0) {
++                Loss l{Broodwar->getFrameCount(), mine, v, typeName(unit->getType()), unit->getPosition()};
++                lossWindow.push_back(l);
++                if (inEngagement) addToEngagement(l);
++            }
++        }
 +    }
 +
 +    void onEnd(bool isWinner)
@@ -568,9 +1053,21 @@ index 0000000..9ad1a13
 +        tracker.reset();
 +        current.reset();
 +        buildingIntel.clear();
++        buildingPos.clear();
++        enemyBases.clear();
++        regions.clear();
++        overrides.clear();
++        overrideLogged.clear();
++        overridesForId.clear();
++        lossWindow.clear();
++        resetEngagement();
 +        mainScoutedFrame = natScoutedFrame = gasFirstSeen = armyFirstSeen = -1;
 +        workersSeenMax   = 0;
 +    }
++
++    // Named region for a position: nearest of main/natural/third/fourth/enemy_main/enemy_natural/enemy_third/center/path_mid
++    // within 12 tiles, else "unknown_area_<BWEM area id>".
++    string regionNameFor(Position p) { return regionName(p); }
 +
 +    // Directive for the override hooks: empty when disabled or when the sidecar only observes (baseline runs).
 +    const optional<Directive> &directive() { return (enabled() && current && !current->observe_only) ? current : none; }
@@ -582,8 +1079,10 @@ index 0000000..9ad1a13
 +        if (!d || d->opening.empty())
 +            return;
 +        string build, opener, transition;
++        const string cur = currentBuild + "/" + currentOpener + "/" + currentTransition;
 +        if (!resolveOpening(d->opening, build, opener, transition)) {
-+            warnOnce("opening '" + d->opening + "' has no allowed McRave build for this matchup, keeping " + currentBuild + "/" + currentOpener + "/" + currentTransition);
++            warnOnce("opening '" + d->opening + "' has no allowed McRave build for this matchup, keeping " + cur);
++            recordOverride("opening", false, cur, d->opening, "no allowed McRave build for this matchup");
 +            return;
 +        }
 +        // Apply once per directive: the LLM sets the opening when it decides; McRave's own scouting reactions may
@@ -592,16 +1091,24 @@ index 0000000..9ad1a13
 +        if (d->directive_id == lastAppliedId)
 +            return;
 +        lastAppliedId = d->directive_id;
++        const string target = build + "/" + opener + "/" + transition;
 +        auto buildChange = (build != currentBuild || opener != currentOpener);
 +        // Build/opener may only change before the transition started; a transition-only change is fine while the book is active.
-+        if (buildChange && inTransition)
++        if (buildChange && inTransition) {
++            recordOverride("opening", false, cur, target, "transition already started");
 +            return;
-+        if (!buildChange && transition == currentTransition)
++        }
++        if (!buildChange && transition == currentTransition) {
++            recordOverride("opening", true, cur, target, "already current");
 +            return;
-+        if (!inOpening)
++        }
++        if (!inOpening) {
++            recordOverride("opening", false, cur, target, "opening book finished");
 +            return;
++        }
 +        LOG("Sidecar: opening ", d->opening, " -> ", build, "/", opener, "/", transition, " (was ", currentBuild, "/", currentOpener, "/", currentTransition, ")");
 +        BuildOrder::setLearnedBuild(build, opener, transition);
++        recordOverride("opening", true, cur, target);
 +    }
 +
 +    void applyBuildFlags()
@@ -611,7 +1118,9 @@ index 0000000..9ad1a13
 +            return;
 +        if (Broodwar->self()->getRace() != Races::Zerg)
 +            return;
++        const string before = wallNat ? "natural_wall" : "none";
 +        wallNat = norm(d->wall_natural) != "none" && !d->wall_natural.empty();
++        recordOverride("wall", true, before, wallNat ? "natural_wall" : "none", Walls::getNaturalWall() ? "" : "McRave found no natural wall on this map");
 +        if (d->stance == "all_in")
 +            pressure = true;
 +    }
@@ -635,13 +1144,18 @@ index 0000000..9ad1a13
 +        // Only army unit names form McRave's unitOrder (tech path). Upgrades/buildings in the list ("metabolic_boost",
 +        // "lair") are left to McRave's own queueUpgrades()/getTechBuildings().
 +        vector<UnitType> order;
++        string requested;
 +        for (auto &name : d->tech_priority) {
++            requested += (requested.empty() ? "" : ",") + name;
 +            auto t = unitTypeFromName(name);
 +            if (isZergArmyType(t) && find(order.begin(), order.end(), t) == order.end())
 +                order.push_back(t);
 +        }
-+        if (order.empty())
++        if (order.empty()) {
++            recordOverride("tech_priority", false, typeListString(unitOrder), requested, "no army unit names (upgrades/buildings stay McRave's)");
 +            return;
++        }
++        recordOverride("tech_priority", true, typeListString(unitOrder), typeListString(order));
 +        unitOrder = order;
 +    }
 +
@@ -650,9 +1164,12 @@ index 0000000..9ad1a13
 +        auto &d = directive();
 +        if (!d || d->unit_mix_target.empty())
 +            return;
-+        if (inOpening && d->keep_current_plan)
++        if (inOpening && d->keep_current_plan) {
++            recordOverride("unit_mix", false, compositionString(armyComposition), "", "opening book with keep_current_plan");
 +            return; // leave the opening book's one-hot ladder alone
++        }
 +        map<UnitType, double> mix;
++        string locked;
 +        for (auto &[name, weight] : d->unit_mix_target) {
 +            auto t = unitTypeFromName(name);
 +            if (t == UnitTypes::None || weight <= 0.0) {
@@ -663,12 +1180,16 @@ index 0000000..9ad1a13
 +            if (!isZergArmyType(t)) continue;
 +            if (!BuildOrder::unlockReady(t)) {
 +                focusUnits.insert(t); // getTechBuildings() will queue the prerequisites
++                locked += (locked.empty() ? "" : ",") + typeName(t);
 +                continue;
 +            }
 +            mix[t] = weight;
 +        }
-+        if (mix.empty())
++        if (mix.empty()) {
++            recordOverride("unit_mix", false, compositionString(armyComposition), "", locked.empty() ? "no known unlocked unit in the target" : "tech not unlocked yet: " + locked);
 +            return;
++        }
++        recordOverride("unit_mix", true, compositionString(armyComposition), compositionString(mix), locked.empty() ? "" : "tech queued for: " + locked);
 +        armyComposition = mix;
 +    }
 +
@@ -678,12 +1199,15 @@ index 0000000..9ad1a13
 +        if (!d)
 +            return;
 +        auto policy = norm(d->expand_policy);
++        auto stateStr = [&] { return string(expandDesired ? "expand" : "hold") + ",hatch_queue=" + to_string(buildQueue[Zerg_Hatchery]); };
++        const string before = stateStr();
 +        if (policy == "never") {
 +            expandDesired = false;
 +            wantThird     = false;
 +            if (int(Stations::getStations(PlayerState::Self).size()) >= 2)
 +                wantNatural = false;
 +            buildQueue[Zerg_Hatchery] = min(buildQueue[Zerg_Hatchery], hatchCount);
++            recordOverride("expand_policy", true, before, stateStr());
 +        }
 +        else if (policy == "greedy") {
 +            if (Stations::getMiningStationsCount() <= 5 && vis(Zerg_Hatchery) - com(Zerg_Hatchery) == 0) {
@@ -691,8 +1215,13 @@ index 0000000..9ad1a13
 +                buildQueue[Zerg_Hatchery] = max(buildQueue[Zerg_Hatchery], hatchCount + 1);
 +                if (int(Stations::getStations(PlayerState::Self).size()) <= 1) wantNatural = true;
 +                if (int(Stations::getStations(PlayerState::Self).size()) <= 2) wantThird = true;
++                recordOverride("expand_policy", true, before, stateStr());
 +            }
++            else
++                recordOverride("expand_policy", false, before, before, vis(Zerg_Hatchery) - com(Zerg_Hatchery) > 0 ? "hatchery already in progress" : "6+ mining stations");
 +        }
++        else
++            recordOverride("expand_policy", true, before, before, "allow_when_safe: McRave decides");
 +        // "allow_when_safe": McRave's own expandDesired logic
 +    }
 +
@@ -702,15 +1231,20 @@ index 0000000..9ad1a13
 +        if (!d)
 +            return;
 +        auto stance = norm(d->stance);
++        const string before = "retreat_types=" + typeListString(staticRetreatTypes);
 +        if (stance == "defensive") {
 +            for (auto &t : BuildOrder::getUnlockedList()) {
 +                if (isZergArmyType(t) && find(staticRetreatTypes.begin(), staticRetreatTypes.end(), t) == staticRetreatTypes.end())
 +                    staticRetreatTypes.push_back(t);
 +            }
++            recordOverride("stance", true, before, "retreat_types=" + typeListString(staticRetreatTypes));
 +        }
 +        else if (stance == "aggressive" || stance == "all_in") {
 +            staticRetreatTypes.clear(); // workers are re-added by updateStaticStates() right after this call
++            recordOverride("stance", true, before, "retreat_types=none", stance == "all_in" ? "pressure=true" : "");
 +        }
++        else
++            recordOverride("stance", true, before, before, "neutral: McRave decides");
 +        // "neutral": McRave's own rules
 +    }
 +
@@ -720,9 +1254,13 @@ index 0000000..9ad1a13
 +        if (!d || !isAttackObjective(norm(d->objective_type)))
 +            return;
 +        auto station = stationFor(d->objective_location);
-+        if (!station || Stations::ownedBy(station) != PlayerState::Enemy)
++        const string before = regionName(attackPosition);
++        if (!station || Stations::ownedBy(station) != PlayerState::Enemy) {
++            recordOverride("objective", false, before, norm(d->objective_type) + "@" + norm(d->objective_location), !station ? "location not a named station" : "station not enemy-owned (yet)");
 +            return; // unknown or not (yet) enemy-owned: McRave's own target
++        }
 +        attackPosition = station->getResourceCentroid();
++        recordOverride("objective", true, before, norm(d->objective_type) + "@" + regionName(attackPosition));
 +    }
 +
 +    void applyDefendPosition(bool &defendNatural, bool &holdNatural, const BWEM::ChokePoint *&defendChoke, const BWEM::Area *&defendArea, Position &defendPosition,
@@ -732,10 +1270,15 @@ index 0000000..9ad1a13
 +        if (!d || !isDefendObjective(norm(d->objective_type)))
 +            return;
 +        auto l = norm(d->objective_location);
++        const string before = regionName(defendPosition);
++        const string target = norm(d->objective_type) + "@" + l;
 +        if (l == "natural") {
 +            auto nat = Terrain::getMyNatural();
-+            if (!nat || !Terrain::getNaturalChoke() || Stations::ownedBy(nat) != PlayerState::Self)
++            if (!nat || !Terrain::getNaturalChoke() || Stations::ownedBy(nat) != PlayerState::Self) {
++                recordOverride("objective", false, before, target, "natural not ours yet");
 +                return; // not ours yet: keep McRave's choice
++            }
++            recordOverride("objective", true, before, target);
 +            defendNatural  = true;
 +            holdNatural    = true;
 +            defendChoke    = Terrain::getNaturalChoke();
@@ -745,8 +1288,11 @@ index 0000000..9ad1a13
 +        }
 +        else if (l == "main") {
 +            auto main = Terrain::getMyMain();
-+            if (!main || !Terrain::getMainChoke())
++            if (!main || !Terrain::getMainChoke()) {
++                recordOverride("objective", false, before, target, "no main choke");
 +                return;
++            }
++            recordOverride("objective", true, before, target);
 +            defendNatural  = false;
 +            holdNatural    = false;
 +            defendChoke    = Terrain::getMainChoke();
@@ -754,6 +1300,8 @@ index 0000000..9ad1a13
 +            defendPosition = Stations::getDefendPosition(main);
 +            defendStation  = main;
 +        }
++        else
++            recordOverride("objective", false, before, target, "location not main|natural (coordinates stay body-side)");
 +    }
 +
 +    // Static defense counts apply to the natural only (wall if McRave made one there, else the natural station).
@@ -766,6 +1314,7 @@ index 0000000..9ad1a13
 +            auto it = d->static_defense.find(key);
 +            if (it == d->static_defense.end())
 +                return nullopt;
++            recordOverride(string("static_defense.") + key, true, string(key) + " have=" + to_string(have), string(key) + " want=" + to_string(max(0, it->second)));
 +            return max(0, it->second) - have;
 +        }
 +        bool isNaturalWall(const BWEB::Wall *wall) { return wall && wall == Walls::getNaturalWall() && wall->getStation() && wall->getStation()->isNatural(); }
@@ -785,10 +1334,10 @@ index 0000000..9ad1a13
 +} // namespace McRave::Sidecar
 diff --git a/Source/McRave/Main/Sidecar.h b/Source/McRave/Main/Sidecar.h
 new file mode 100644
-index 0000000..ab9355d
+index 0000000..10ec82a
 --- /dev/null
 +++ b/Source/McRave/Main/Sidecar.h
-@@ -0,0 +1,52 @@
+@@ -0,0 +1,57 @@
 +// Sidecar: SC_AI hooks (body/HOOKS.md section 5). Thin wrapper around body/sidecar_client/{SidecarClient,StateTracker}.hpp.
 +//
 +// Enabled only when env SIDECAR_HOST or SIDECAR_PORT is set, or bwapi-data/sidecar.ini exists. Otherwise every
@@ -799,6 +1348,7 @@ index 0000000..ab9355d
 +#include <BWAPI.h>
 +
 +#include <optional>
++#include <string>
 +#include <vector>
 +
 +namespace BWEB {
@@ -821,6 +1371,10 @@ index 0000000..ab9355d
 +    void onUnitDiscover(BWAPI::Unit);
 +    void onUnitDestroy(BWAPI::Unit);
 +    void onEnd(bool isWinner);
++
++    // Named regions (item A): nearest named location (main, natural, third, fourth, enemy_main, enemy_natural, enemy_third,
++    // center, path_mid) within 12 tiles of the position, else "unknown_area_<BWEM area id>". Valid from the first frame on.
++    std::string regionNameFor(BWAPI::Position);
 +
 +    // Current directive, only if valid(frame); otherwise an empty optional (expiry -> McRave defaults).
 +    const std::optional<Directive> &directive();

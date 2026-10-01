@@ -4,6 +4,7 @@
 
 #include <BWAPI.h>
 
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -22,10 +23,14 @@ public:
         const int frame = bw->getFrameCount();
         std::map<std::string, int> buildingNow, unitNow;
         cloaked_.clear();
+        long long ex = 0, ey = 0; int en = 0;
         for (auto u : bw->enemy()->getUnits()) {
             if (!u->exists()) continue;
             const auto type = u->getType();
             const std::string name = norm(type.getName());
+            if (!type.isBuilding() && !type.isWorker() && type.canAttack() && type != BWAPI::UnitTypes::Zerg_Larva) {
+                ex += u->getPosition().x; ey += u->getPosition().y; en++;
+            }
             if (type.isBuilding()) {
                 buildingNow[name]++;
                 if (!buildings_.count(name)) {
@@ -44,6 +49,7 @@ public:
                 if (!cloakedWarned_) { events_.push_back({"cloaked", name, frame}); cloakedWarned_ = true; }
             }
         }
+        if (en > 0) { enemyArmyPos_ = BWAPI::Position(int(ex / en), int(ey / en)); enemyArmyFrame_ = frame; }
         for (auto& [name, n] : buildingNow) buildings_[name].count = std::max(buildings_[name].count, n);
         for (auto& [name, n] : unitNow) units_[name].count = std::max(units_[name].count, n);
         if (bw->enemy()->getRace() != BWAPI::Races::Unknown) enemyRace_ = norm(bw->enemy()->getRace().getName());
@@ -56,8 +62,9 @@ public:
         }
     }
 
-    void pushEvent(const std::string& type, const std::string& what) {
-        events_.push_back({type, what, BWAPI::Broodwar->getFrameCount()});
+    // `detail` (optional) is emitted as the event's "detail" object (engagement losses, ...).
+    void pushEvent(const std::string& type, const std::string& what, nlohmann::json detail = nlohmann::json()) {
+        events_.push_back({type, what, BWAPI::Broodwar->getFrameCount(), std::move(detail)});
     }
     bool hasPendingEvents() const { return !events_.empty(); }
 
@@ -67,6 +74,23 @@ public:
     nlohmann::json metrics = nlohmann::json::object();
     // Intel brief (scouting intelligence organised for the Strategy LLM), filled by the body every emit. See Sidecar::fillIntel().
     nlohmann::json intel = nlohmann::json::object();
+    // Named regions {name: {tile:[x,y], owner}} (Sidecar::buildRegions), emitted top-level as "regions".
+    nlohmann::json regions = nlohmann::json::object();
+    // Extra keys merged into "me" (bases, production), "enemy" and "execution" (overrides, results). Filled by the body on emit frames.
+    nlohmann::json meExtra = nlohmann::json::object();
+    nlohmann::json enemyExtra = nlohmann::json::object();
+    nlohmann::json executionExtra = nlohmann::json::object();
+    // Position -> named region ("main", "enemy_natural", "unknown_area_12"); set by the body (Sidecar::regionNameFor).
+    std::function<std::string(BWAPI::Position)> regionNamer;
+
+    static std::string gameTime(int frame) {
+        if (frame < 0) return "?";
+        const int secs = frame * 42 / 1000;  // ~23.81 fps
+        char gt[16]; std::snprintf(gt, sizeof gt, "%d:%02d", secs / 60, secs % 60);
+        return gt;
+    }
+    BWAPI::Position enemyArmyPosSeen() const { return enemyArmyPos_; }
+    int enemyArmyFrameSeen() const { return enemyArmyFrame_; }
 
     // Read-only views for the body's intel assembly.
     const std::map<std::string, SeenBuilding>& buildingsSeen() const { return buildings_; }
@@ -107,24 +131,39 @@ public:
         for (auto& [n, s] : units_) enemyArmy += s.count * priceOf(n);
 
         nlohmann::json events = nlohmann::json::array();
-        for (auto& e : events_) events.push_back({{"type", e.type}, {"what", e.what}, {"frame", e.frame}});
+        for (auto& e : events_) {
+            nlohmann::json ev = {{"type", e.type}, {"what", e.what}, {"frame", e.frame}};
+            if (!e.detail.is_null()) ev["detail"] = e.detail;
+            events.push_back(ev);
+        }
         events_.clear();
 
         const int secs = frame * 42 / 1000;  // ~23.81 fps
         char gt[16]; std::snprintf(gt, sizeof gt, "%d:%02d", secs / 60, secs % 60);
         const std::string matchup = std::string("Zv") + (enemyRace_.empty() ? "X" : std::string(1, static_cast<char>(toupper(enemyRace_[0]))));
 
+        nlohmann::json meJ = {{"minerals", me->minerals()}, {"gas", me->gas()}, {"supply", {me->supplyUsed() / 2, me->supplyTotal() / 2}},
+                              {"larva", larva}, {"units", myUnits}, {"buildings", myBuildings}, {"tech", tech}, {"army_value", armyValue},
+                              {"army_pos", armyN ? nlohmann::json({ax / armyN, ay / armyN}) : nlohmann::json(nullptr)}};
+        meJ["army_region"] = (armyN && regionNamer) ? regionNamer(BWAPI::Position(int(ax / armyN), int(ay / armyN))) : std::string();   // "" = no army
+        for (auto& [k, v] : meExtra.items()) meJ[k] = v;
+        nlohmann::json enemyJ = {{"race", enemyRace_.empty() ? "unknown" : enemyRace_}, {"units_seen", enemyUnits},
+                                 {"buildings_seen", enemyBuildings}, {"expansions", expansions()}, {"army_value_seen", enemyArmy},
+                                 {"army_pos_seen", nullptr}, {"suspected_cloaked", cloaked_}};
+        enemyJ["army_region_seen"] = (enemyArmyFrame_ >= 0 && regionNamer) ? regionNamer(enemyArmyPos_) : std::string();   // "" = never seen
+        enemyJ["army_last_seen_time"] = enemyArmyFrame_ >= 0 ? gameTime(enemyArmyFrame_) : std::string();
+        for (auto& [k, v] : enemyExtra.items()) enemyJ[k] = v;
+        nlohmann::json execJ = {{"directive_id", directiveId.empty() ? nlohmann::json(nullptr) : nlohmann::json(directiveId)}, {"goals", nlohmann::json::array()}};
+        for (auto& [k, v] : executionExtra.items()) execJ[k] = v;
+
         return {
             {"game_id", gameId}, {"frame", frame}, {"game_time", gt}, {"matchup", matchup}, {"map", cleanName(bw->mapName())},
-            {"me", {{"minerals", me->minerals()}, {"gas", me->gas()}, {"supply", {me->supplyUsed() / 2, me->supplyTotal() / 2}},
-                    {"larva", larva}, {"units", myUnits}, {"buildings", myBuildings}, {"tech", tech}, {"army_value", armyValue},
-                    {"army_pos", armyN ? nlohmann::json({ax / armyN, ay / armyN}) : nlohmann::json(nullptr)}}},
-            {"enemy", {{"race", enemyRace_.empty() ? "unknown" : enemyRace_}, {"units_seen", enemyUnits},
-                       {"buildings_seen", enemyBuildings}, {"expansions", expansions()}, {"army_value_seen", enemyArmy},
-                       {"army_pos_seen", nullptr}, {"suspected_cloaked", cloaked_}}},
+            {"me", meJ},
+            {"enemy", enemyJ},
+            {"regions", regions},
             {"combat_sim", combatSim},
             {"events", events},
-            {"execution", {{"directive_id", directiveId.empty() ? nlohmann::json(nullptr) : nlohmann::json(directiveId)}, {"goals", nlohmann::json::array()}}},
+            {"execution", execJ},
             {"body_defaults", bodyDefaults},
             {"metrics", metrics},
             {"intel", intel},
@@ -132,7 +171,7 @@ public:
     }
 
 private:
-    struct Event { std::string type, what; int frame; };
+    struct Event { std::string type, what; int frame; nlohmann::json detail; };
 
     static std::string cleanName(const std::string& s) {
         std::string out;
@@ -164,4 +203,6 @@ private:
     nlohmann::json cloaked_ = nlohmann::json::array();
     bool cloakedWarned_ = false;
     std::string enemyRace_;
+    BWAPI::Position enemyArmyPos_ = BWAPI::Positions::Invalid;
+    int enemyArmyFrame_ = -1;
 };

@@ -169,3 +169,73 @@ before the first minute), `apm_game`. Nothing is throttled.
 - Verified in real OpenBW games (single player and 2-process LAN): state posts every 24 frames, directive drawn/logged, `/game/end` received, replay saved.
 - `applyOpening()` now applies **once per directive id**. Per-frame application fought McRave's scouting reaction (2Rax -> PoolHatch/Overpool) every frame (2,059 log lines in one game). The body stays reactive; the next directive re-decides.
 - `Game::getRandomSeed()` throws on the OpenBW fork; the client uses the pid for the game id instead.
+
+## Audit items A/B/C/E on the body side (2026-10-01)
+
+All new keys are filled on emit frames only (every `every` frames or when events are pending); the per-frame work is the
+loss window (item C) and the override recording inside the hooks. No existing key changed.
+
+### A. Positions as named regions (`Sidecar.cpp buildRegions()/regionName()`, `Sidecar::regionNameFor(Position)`)
+
+`"regions": {name: {"tile": [x, y], "owner": "me|enemy|none"}}` is emitted in every post. Names: `main`, `natural`, `third`,
+`fourth` (McRave `Expansion::getExpandOrder()` after main/natural; before it exists, the closest stations by ground distance
+from the natural), `enemy_main`, `enemy_natural`, `enemy_third` (first other enemy station), `center` (BWEM map center),
+`path_mid` (center of the middle chokepoint of the BWEM path main -> enemy main). Built on the first emit frame (McRave's
+Terrain/Stations/Walls are initialised *after* `Sidecar::onStart`) and refreshed on every emit (owners, enemy_* once scouted).
+`regionNameFor(p)` = nearest named region within 12 tiles, else `unknown_area_<BWEM area id>`. The tracker gets this as
+`StateTracker::regionNamer` and uses it for `me.army_region` (own army centroid) and `enemy.army_region_seen` +
+`enemy.army_last_seen_time` (centroid of the visible enemy army the last time any was visible, from `StateTracker::update()`).
+
+`me.bases[]` (`fillMyBases()`): `{name, workers_minerals, workers_gas, mineral_patches, gas_geysers, saturation (=
+workers_minerals / (2 * patches), capped 1.0), hatcheries}` from `Resources::getMyMinerals()/getMyGas()` gatherer counts per
+`ResourceInfo::getStation()`; hatcheries = own resource depots within 10 tiles of the station. `me.production`:
+`{"in_progress": {type: count}, "larva": n}` from eggs/cocoons/lurker eggs (`getBuildType()`), morphing and incomplete buildings.
+
+`intel.buildings[type].positions[]`: `{region, tile, progress (0..1; from `getRemainingBuildTime()` while visible, 1.0 when
+completed, else McRave's start/complete estimate), completes_time ("m:ss", "?" once completed or unknown), last_seen_time}` for every
+enemy building McRave still remembers (`Units::getUnits(Enemy)`, keyed by BWAPI unit so unseen buildings keep their last state).
+`intel.enemy_bases[]`: `{region, workers_seen_max, last_seen_time, hatcheries, owner}` per McRave enemy station; workers are
+visible enemy workers within 10 tiles on emit frames (max kept), hatcheries = remembered enemy depots within 10 tiles.
+
+### B. Execution feedback (`execution.overrides[]`, `execution.results`)
+
+Each `apply*()` records what it did on its frame with `recordOverride(field, applied, before, after, note)`:
+`opening` (tuple before/after, notes: no allowed build / transition already started / already current / opening book finished),
+`wall` (`none|natural_wall`), `tech_priority` (unitOrder list), `unit_mix` (armyComposition `type:weight,...`, note lists units
+whose tech was queued instead), `expand_policy` (`expand|hold,hatch_queue=n`), `stance` (`retreat_types=...`), `objective`
+(region of attack/defend position before -> `type@location`), `static_defense` (`sunken have=n` -> `want=m`; one entry per key,
+or `applied=false` when we hold neither the natural wall nor the natural). Statuses persist for the directive id and are cleared
+when the id changes (or the directive expires / is observe-only, so `--strategy fixed` posts an empty list). One McRave log line
+(`Sidecar: override <field> applied|not applied: before -> after (note)`) is written only when a field's before/after/note changes.
+`results`: `{sunken, spore (built or morphing), army_actual {type: count}, drones, drone_delta_since_directive}` (drones at the
+frame the directive id was first seen). `goals` stays `[]`.
+
+### C. Engagement events (`updateEngagement()`, every frame, from `onUnitDestroy`)
+
+Own and enemy unit losses (mineral+gas value, halved for two-per-egg types; larva/eggs skipped) go into a 240-frame sliding window.
+When the window total first exceeds 150, event `engagement_start` (`what` = region of the losses' centroid, `detail = {my_losses,
+enemy_losses, my_value, enemy_value}`). After 120 frames without a loss: `engagement_end` with the engagement totals, `ratio`
+(enemy value / my value), `outcome` (`lost` < 0.7, `won` > 1.4, else `even`), `start_frame`, `end_frame`. Both go through
+`StateTracker::pushEvent(type, what, detail)` (events now carry an optional `detail` object) and trigger an immediate post.
+
+### E. Map dump: `SC_AI_MAP_DUMP=<path>`
+
+On the first `emitIfDue()` (frame 0, all managers initialised, sidecar not required) writes a JSON with `map`, `map_file`,
+`size_tiles`, `start_locations`, `our_start_tile`, `regions` (`{name: [x, y]}`, the converter's format) + `regions_detail`
+(`{name: {tile, owner}}`), `bases[]` (`tile` = BWEM hall location, `center_tile`, `minerals`, `minerals_total`, `gas`, `gas_total`,
+`isStart`, `is_main`, `is_natural`, `area_id`, `region`, `owner`, `ground_distance_from_main` px, BWEB `defense_tiles`), `chokes[]`
+(`center`/`center_tile`, `width` px + `width_tiles`, `areas`, `blocked`, `is_main_choke`, `is_natural_choke`, `region`),
+`wall_natural`/`wall_main` (full BWEB wall: raw building list, large/medium/small tiles, openings, defense tiles by row,
+`zergling_tight: null` because BWEB keeps tightType/requireTight private; McRave creates Zerg natural walls with
+`tight=false, openWall=true`, reported as `open_wall: true`), the converter's `natural_wall` (`buildings`, `tiles`,
+`zergling_tight: false`), `natural_defenses` (flat tile list: natural station defenses then the wall's first defense row),
+`natural_detail` (pocket defense, defend position) and McRave's `expand_order`; then `leaveGame()`. Converter:
+`python -m tools.map_knowledge_from_dump <dump> [--out ...]` -> `knowledge/maps/<map>.json` (human review before adoption).
+Reference dump: `eval/results/map_dump_fighting_spirit.json` (git-ignored; 14 bases, 29 chokes, natural wall hatchery+evo).
+The regions in a dump are for the start position the dumping game happened to get.
+
+### Debug: `SC_AI_DUMP_STATE=<path>`
+
+`SidecarClient` appends every posted StateSummary as one JSON line (written by the POST thread, not the game thread), so the
+payload can be checked without the sidecar. `tools/run_game_openbw.sh` forwards `SC_AI_DUMP_STATE` and `SC_AI_MAP_DUMP` to our
+side only (and unsets them for the opponent), like the other `SC_AI_*` variables.

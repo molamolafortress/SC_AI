@@ -16,6 +16,8 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
+#include <fstream>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -80,6 +82,7 @@ public:
     SidecarClient(std::string host, int port, int postEveryFrames = 24, int timeoutMs = 2000)
         : host_(std::move(host)), port_(port), every_(postEveryFrames), timeoutMs_(timeoutMs) {
         gameId_ = makeGameId();
+        if (const char* d = std::getenv("SC_AI_DUMP_STATE"); d && *d) dumpPath_ = d;   // debug: append every posted StateSummary (JSONL)
         worker_ = std::thread([this] { loop(); });
     }
     ~SidecarClient() { stop(); }
@@ -145,6 +148,10 @@ private:
                 payload.swap(pending_);
                 inflight_ = true;
             }
+            if (!dumpPath_.empty()) {
+                std::ofstream f(dumpPath_, std::ios::app);
+                if (f) f << payload << '\n';
+            }
             auto res = cli.Post("/state", payload, "application/json");
             {
                 std::lock_guard<std::mutex> lk(mu_);
@@ -188,6 +195,7 @@ private:
     std::string host_;
     int port_, every_, timeoutMs_;
     std::string gameId_;
+    std::string dumpPath_;
     mutable std::mutex mu_;
     std::condition_variable cv_;
     std::string pending_;
