@@ -1,0 +1,205 @@
+diff --git a/BOSS/source/BOSSAssert.cpp b/BOSS/source/BOSSAssert.cpp
+index 9d916dd..356e41f 100644
+--- a/BOSS/source/BOSSAssert.cpp
++++ b/BOSS/source/BOSSAssert.cpp
+@@ -1,5 +1,6 @@
+ #include "BOSSAssert.h"
+ #include "BOSSException.h"
++#include <cstring>
+ 
+ using namespace BOSS;
+ 
+diff --git a/BOSS/source/GameState.cpp b/BOSS/source/GameState.cpp
+index b3f0153..e2025aa 100644
+--- a/BOSS/source/GameState.cpp
++++ b/BOSS/source/GameState.cpp
+@@ -14,7 +14,7 @@ GameState::GameState(const RaceID r)
+     
+ }
+ 
+-#ifdef _MSC_VER
++#if defined(_MSC_VER) || defined(BOSS_USE_BWAPI_GAMESTATE)
+ GameState::GameState(BWAPI::GameWrapper & game, BWAPI::PlayerInterface * self, const std::vector<BWAPI::UnitType> & buildingsQueued)
+     : _race                 (Races::GetRaceID(self->getRace()))
+     , _currentFrame         (game->getFrameCount())
+diff --git a/BOSS/source/GameState.h b/BOSS/source/GameState.h
+index 56741a5..67838d2 100644
+--- a/BOSS/source/GameState.h
++++ b/BOSS/source/GameState.h
+@@ -67,7 +67,7 @@ public:
+ 
+ // constructor based on BWAPI::Game only makes sense if using VS
+ // we won't be using this if we're compiling to emscripten or linux
+-#ifdef _MSC_VER
++#if defined(_MSC_VER) || defined(BOSS_USE_BWAPI_GAMESTATE)
+     GameState(BWAPI::GameWrapper & game, BWAPI::PlayerInterface * player, const std::vector<BWAPI::UnitType> & buildingsQueued);
+ #endif
+ 
+diff --git a/UAlbertaBot/Source/BuildingData.cpp b/UAlbertaBot/Source/BuildingData.cpp
+index 7fd1004..5e6bb5a 100644
+--- a/UAlbertaBot/Source/BuildingData.cpp
++++ b/UAlbertaBot/Source/BuildingData.cpp
+@@ -9,7 +9,7 @@ BuildingData::BuildingData()
+ 
+ void BuildingData::removeBuilding(const Building & b)
+ {
+-    auto & building = std::find(m_buildings.begin(), m_buildings.end(), b);
++    auto building = std::find(m_buildings.begin(), m_buildings.end(), b);
+ 
+     if (building != m_buildings.end())
+     {
+diff --git a/UAlbertaBot/Source/BuildingManager.cpp b/UAlbertaBot/Source/BuildingManager.cpp
+index 07cc53b..ded3972 100644
+--- a/UAlbertaBot/Source/BuildingManager.cpp
++++ b/UAlbertaBot/Source/BuildingManager.cpp
+@@ -455,7 +455,7 @@ void BuildingManager::removeBuildings(const std::vector<Building> & toRemove)
+ {
+     for (auto & b : toRemove)
+     {
+-        auto & it = std::find(m_buildings.begin(), m_buildings.end(), b);
++        auto it = std::find(m_buildings.begin(), m_buildings.end(), b);
+ 
+         if (it != m_buildings.end())
+         {
+diff --git a/UAlbertaBot/Source/CombatSimulation.h b/UAlbertaBot/Source/CombatSimulation.h
+index 00c64dd..275e5ff 100644
+--- a/UAlbertaBot/Source/CombatSimulation.h
++++ b/UAlbertaBot/Source/CombatSimulation.h
+@@ -6,10 +6,10 @@
+ 	#include "Visualizer.h"
+ #endif
+ 
+-#include "..\..\SparCraft\source\GameState.h"
+-#include "..\..\SparCraft\source\Game.h"
+-#include "..\..\SparCraft\source\Unit.h"
+-#include "..\..\SparCraft\source\AllPlayers.h"
++#include "../../SparCraft/source/GameState.h"
++#include "../../SparCraft/source/Game.h"
++#include "../../SparCraft/source/Unit.h"
++#include "../../SparCraft/source/AllPlayers.h"
+ 
+ namespace UAlbertaBot
+ {
+diff --git a/UAlbertaBot/Source/Logger.cpp b/UAlbertaBot/Source/Logger.cpp
+index 7f43183..d86b8fe 100644
+--- a/UAlbertaBot/Source/Logger.cpp
++++ b/UAlbertaBot/Source/Logger.cpp
+@@ -23,7 +23,7 @@ void Logger::LogAppendToFile(const std::string & logFile, const char *fmt, ...)
+ 	va_start(arg, fmt);
+ 	//vfprintf(log_file, fmt, arg);
+ 	char buff[256];
+-	vsnprintf_s(buff, 256, fmt, arg);
++	vsnprintf(buff, 256, fmt, arg);
+ 	va_end(arg);
+ 		
+ 	std::ofstream logStream;
+diff --git a/UAlbertaBot/Source/ParseUtils.cpp b/UAlbertaBot/Source/ParseUtils.cpp
+index 44bd2d4..6bf24fa 100644
+--- a/UAlbertaBot/Source/ParseUtils.cpp
++++ b/UAlbertaBot/Source/ParseUtils.cpp
+@@ -1,5 +1,5 @@
+ #include "ParseUtils.h"
+-#include "rapidjson\document.h"
++#include "rapidjson/document.h"
+ #include "JSONTools.h"
+ #include "BuildOrder.h"
+ #include "StrategyManager.h"
+@@ -221,7 +221,8 @@ void ParseUtils::ParseConfigFile(const std::string & filename)
+                     }
+                 }
+ 
+-                Global::Strategy().addStrategy(name, Strategy(name, strategyRace, buildOrder));
++                Strategy strategy(name, strategyRace, buildOrder);
++                Global::Strategy().addStrategy(name, strategy);
+             }
+         }
+     }
+diff --git a/UAlbertaBot/Source/ProductionManager.cpp b/UAlbertaBot/Source/ProductionManager.cpp
+index d0aa28c..413216d 100644
+--- a/UAlbertaBot/Source/ProductionManager.cpp
++++ b/UAlbertaBot/Source/ProductionManager.cpp
+@@ -33,7 +33,7 @@ void ProductionManager::performBuildOrderSearch()
+ 
+     PROFILE_FUNCTION();
+ 
+-    BuildOrder & buildOrder = m_bossManager.getBuildOrder();
++    BuildOrder buildOrder = m_bossManager.getBuildOrder();
+ 
+     if (buildOrder.size() > 0)
+     {
+diff --git a/UAlbertaBot/Source/Profiler.hpp b/UAlbertaBot/Source/Profiler.hpp
+index 761a25d..db7297d 100644
+--- a/UAlbertaBot/Source/Profiler.hpp
++++ b/UAlbertaBot/Source/Profiler.hpp
+@@ -3,6 +3,7 @@
+ #include <chrono>
+ #include <fstream>
+ #include <mutex>
++#include <thread>
+ #include <map>
+ #include <algorithm>
+ 
+diff --git a/UAlbertaBot/Source/SquadData.cpp b/UAlbertaBot/Source/SquadData.cpp
+index 2be5a32..880e373 100644
+--- a/UAlbertaBot/Source/SquadData.cpp
++++ b/UAlbertaBot/Source/SquadData.cpp
+@@ -39,7 +39,7 @@ void SquadData::clearSquadData()
+ 
+ void SquadData::removeSquad(const std::string & squadName)
+ {
+-    auto & squadPtr = m_squads.find(squadName);
++    auto squadPtr = m_squads.find(squadName);
+ 
+     UAB_ASSERT_WARNING(squadPtr != m_squads.end(), "Trying to clear a squad that didn't exist: %s", squadName.c_str());
+     if (squadPtr == m_squads.end())
+diff --git a/UAlbertaBot/Source/UABAssert.cpp b/UAlbertaBot/Source/UABAssert.cpp
+index 90e759b..7907494 100644
+--- a/UAlbertaBot/Source/UABAssert.cpp
++++ b/UAlbertaBot/Source/UABAssert.cpp
+@@ -17,7 +17,11 @@ namespace Assert
+         struct tm  tstruct;
+         char       buf[80];
+         //tstruct = *localtime(&now);
++#ifdef _WIN32
+ 		localtime_s(&tstruct, &now);
++#else
++		localtime_r(&now, &tstruct);
++#endif
+         strftime(buf, sizeof(buf), "%Y-%m-%d_%X", &tstruct);
+ 
+         return buf;
+@@ -31,7 +35,7 @@ namespace Assert
+             va_list args;
+             va_start(args, msg);
+             //vsprintf(messageBuffer, msg, args);
+-			vsnprintf_s(messageBuffer, 1024, msg, args);
++			vsnprintf(messageBuffer, 1024, msg, args);
+             va_end(args);
+         }
+ 
+diff --git a/UAlbertaBot/Source/UnitData.cpp b/UAlbertaBot/Source/UnitData.cpp
+index 6545925..a718b5f 100644
+--- a/UAlbertaBot/Source/UnitData.cpp
++++ b/UAlbertaBot/Source/UnitData.cpp
+@@ -22,7 +22,7 @@ void UnitData::updateUnit(BWAPI::Unit unit)
+ 	if (!unit) { return; }
+ 
+     bool firstSeen = false;
+-    auto & it = unitMap.find(unit);
++    auto it = unitMap.find(unit);
+     if (it == unitMap.end())
+     {
+         firstSeen = true;
+diff --git a/UAlbertaBot/Source/UnitUtil.cpp b/UAlbertaBot/Source/UnitUtil.cpp
+index 14c9073..1d7b085 100644
+--- a/UAlbertaBot/Source/UnitUtil.cpp
++++ b/UAlbertaBot/Source/UnitUtil.cpp
+@@ -74,7 +74,7 @@ double UnitUtil::GetDistanceBetweenTwoRectangles(Rect & rect1, Rect & rect2)
+     int diffX = std::max(0, mostLeft.x == mostRight.x ? 0 : mostRight.x - (mostLeft.x + mostLeft.width));
+     int diffY = std::max(0, upper.y == lower.y ? 0 : lower.y - (upper.y + upper.height));
+     
+-    return std::sqrtf(static_cast<float>(diffX*diffX + diffY*diffY));
++    return std::sqrt(static_cast<float>(diffX*diffX + diffY*diffY));
+ }
+ 
+ bool UnitUtil::CanAttack(BWAPI::Unit attacker, BWAPI::Unit target)

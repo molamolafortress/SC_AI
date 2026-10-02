@@ -1,0 +1,90 @@
+diff --git a/Source/BWEB/PathFind.cpp b/Source/BWEB/PathFind.cpp
+index dc399e4..b8c8331 100644
+--- a/Source/BWEB/PathFind.cpp
++++ b/Source/BWEB/PathFind.cpp
+@@ -1,4 +1,6 @@
+ #include "PathFind.h"
++#include <climits>
++#include <cstring>
+ 
+ #include "BWEB.h"
+ #include "JPS.h"
+diff --git a/Source/BWEB/Station.h b/Source/BWEB/Station.h
+index 3864a9d..2cd9419 100644
+--- a/Source/BWEB/Station.h
++++ b/Source/BWEB/Station.h
+@@ -2,6 +2,7 @@
+ #include <BWAPI.h>
+ 
+ #include <bwem.h>
++#include <cfloat>
+ #include <set>
+ #include <optional>
+ 
+diff --git a/Source/BWEB/Wall.h b/Source/BWEB/Wall.h
+index d2e1ace..3476014 100644
+--- a/Source/BWEB/Wall.h
++++ b/Source/BWEB/Wall.h
+@@ -2,6 +2,7 @@
+ #include <BWAPI.h>
+ 
+ #include <bwem.h>
++#include <cfloat>
+ #include <set>
+ 
+ namespace BWEB {
+diff --git a/Source/BWEM/area.cpp b/Source/BWEM/area.cpp
+index 171491a..7d97eea 100644
+--- a/Source/BWEM/area.cpp
++++ b/Source/BWEM/area.cpp
+@@ -18,7 +18,7 @@
+ #include "winutils.h"
+ #include "bwapiExt.h"
+ 
+-#include "BaseFinder\BaseFinder.h"
++#include "BaseFinder/BaseFinder.h"
+ 
+ using namespace BWAPI;
+ using namespace BWAPI::UnitTypes::Enum;
+diff --git a/Source/BWEM/mapImpl.cpp b/Source/BWEM/mapImpl.cpp
+index ead7edf..b057b58 100644
+--- a/Source/BWEM/mapImpl.cpp
++++ b/Source/BWEM/mapImpl.cpp
+@@ -13,7 +13,7 @@
+ #include "bwapiExt.h"
+ #include "winutils.h"
+ 
+-#include "BaseFinder\BaseFinder.h"
++#include "BaseFinder/BaseFinder.h"
+ 
+ 
+ using namespace BWAPI;
+diff --git a/Source/BWEM/utils.h b/Source/BWEM/utils.h
+index 14da4e5..cd00e12 100644
+--- a/Source/BWEM/utils.h
++++ b/Source/BWEM/utils.h
+@@ -14,6 +14,8 @@
+ #define BWEM_UTILS_H
+ 
+ 
++#include <cmath>
++#include <sstream>
+ #include <string>
+ #include <vector>
+ #include <algorithm>
+diff --git a/Source/McRave/Main/Common.h b/Source/McRave/Main/Common.h
+index 20d5c33..8d0aa55 100644
+--- a/Source/McRave/Main/Common.h
++++ b/Source/McRave/Main/Common.h
+@@ -1,6 +1,11 @@
+ #pragma once
+ #include <BWAPI.h>
+ 
++#include <cfloat>
++#include <climits>
++#include <cstring>
++#include <cmath>
++#include <functional>
+ #include <map>
+ #include <optional>
+ #include <set>

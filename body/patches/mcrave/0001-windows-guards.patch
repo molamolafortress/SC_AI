@@ -1,0 +1,44 @@
+diff --git a/Source/BWEM/defs.h b/Source/BWEM/defs.h
+index a83079b..5040c48 100644
+--- a/Source/BWEM/defs.h
++++ b/Source/BWEM/defs.h
+@@ -31,7 +31,7 @@ namespace detail
+ #define bwem_assert_throw(expr)                    ;//bwem_assert_throw_plus(expr, "")
+ 
+ 
+-#define BWEM_USE_WINUTILS 1        // enable(1) or disable(0) the compilation of winutils.cpp
++#define BWEM_USE_WINUTILS 0        // enable(1) or disable(0) the compilation of winutils.cpp
+                                 // winutils.h provides optional utils that require the windows headers.
+ 
+ #define BWEM_USE_MAP_PRINTER 1    // enable(1) or disable(0) the compilation of mapPrinter.cpp
+diff --git a/Source/McRave/Main/Visuals.cpp b/Source/McRave/Main/Visuals.cpp
+index d000820..bc8481d 100644
+--- a/Source/McRave/Main/Visuals.cpp
++++ b/Source/McRave/Main/Visuals.cpp
+@@ -1,7 +1,9 @@
+ #include "Visuals.h"
+ 
+ #include <chrono>
++#ifdef _WIN32
+ #include <windows.h>
++#endif
+ 
+ #include "Builds/All/BuildOrder.h"
+ #include "Builds/All/Learning.h"
+@@ -230,12 +232,16 @@ namespace McRave::Visuals {
+         void getCurrentWindow()
+         {
+             // Thanks random cpp forum user
++#ifdef _WIN32
+             char wnd_title[256];
+             string str_title;
+             HWND hwnd = GetForegroundWindow();
+             GetWindowText(hwnd, wnd_title, sizeof(wnd_title));
+             str_title   = string(wnd_title);
+             gameFocused = (str_title == "Brood War");
++#else
++            gameFocused = true;     // no window focus concept in headless OpenBW; only gates drawing
++#endif
+         }
+     } // namespace
+ 

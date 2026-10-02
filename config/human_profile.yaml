@@ -1,0 +1,7 @@
+# Human-condition profile enforced by the body's command hook (hook 3). Off by default.
+enabled: false
+apm: 300            # sustained actions per game minute
+burst: 10           # token bucket capacity
+count_selection_as_action: true
+max_selection: 12
+observation_delay_frames: 6

@@ -1,0 +1,165 @@
+diff --git a/Source/BWEB/Block.cpp b/Source/BWEB/Block.cpp
+index c57e97e..0b096c9 100644
+--- a/Source/BWEB/Block.cpp
++++ b/Source/BWEB/Block.cpp
+@@ -11,7 +11,7 @@ namespace BWEB {
+     void Block::draw()
+     {
+         int color     = Broodwar->self()->getColor();
+-        int textColor = color == 185 ? textColor = Text::DarkGreen : Broodwar->self()->getTextColor();
++        int textColor = color == 185 ? Text::DarkGreen : Broodwar->self()->getTextColor();
+ 
+         // Draw boxes around each feature
+         for (auto &tile : smallTiles) {
+@@ -48,8 +48,8 @@ namespace BWEB::Blocks {
+ 
+         void addToBlockGrid(TilePosition start, TilePosition end, BlockType type)
+         {
+-            for (int x = start.x; x < end.x; x++) {
+-                for (int y = start.y; y < end.y; y++)
++            for (int x = std::max(start.x, 0); x < std::min(end.x, 256); x++) {
++                for (int y = std::max(start.y, 0); y < std::min(end.y, 256); y++)
+                     blockGrid[x][y] = type;
+             }
+         }
+diff --git a/Source/BWEB/Station.cpp b/Source/BWEB/Station.cpp
+index 7ce4e74..4a12c2a 100644
+--- a/Source/BWEB/Station.cpp
++++ b/Source/BWEB/Station.cpp
+@@ -471,7 +471,7 @@ namespace BWEB {
+                         Map::isPlaceable(Zerg_Sunken_Colony, base->Location() + defense)) {
+                         mediumTiles.insert(base->Location() + medium);
+                         smallTiles.insert(base->Location() + small);
+-                        defenses.insert(defense);
++                        defenses.insert(base->Location() + defense);
+                         break;
+                     }
+                 }
+@@ -523,7 +523,7 @@ namespace BWEB {
+     const void Station::draw(std::optional<BWAPI::Color> color) const
+     {
+         int drawColor = !color ? Broodwar->self()->getColor() : color.value();
+-        int textColor = drawColor == 185 ? textColor = Text::DarkGreen : Broodwar->self()->getTextColor();
++        int textColor = drawColor == 185 ? Text::DarkGreen : Broodwar->self()->getTextColor();
+ 
+         if (main) {
+             auto angle    = Map::getAngle(base->Center(), resourceCentroid);
+diff --git a/Source/BWEB/Wall.cpp b/Source/BWEB/Wall.cpp
+index 65f8b39..caf15a2 100644
+--- a/Source/BWEB/Wall.cpp
++++ b/Source/BWEB/Wall.cpp
+@@ -575,7 +575,7 @@ namespace BWEB {
+     {
+         set<Position> anglePositions;
+         int color     = Broodwar->self()->getColor();
+-        int textColor = color == 185 ? textColor = Text::DarkGreen : Broodwar->self()->getTextColor();
++        int textColor = color == 185 ? Text::DarkGreen : Broodwar->self()->getTextColor();
+ 
+         // Draw boxes around each feature
+         auto drawBoxes = true;
+diff --git a/Source/BWEB/Wall.h b/Source/BWEB/Wall.h
+index 3476014..94fd79a 100644
+--- a/Source/BWEB/Wall.h
++++ b/Source/BWEB/Wall.h
+@@ -89,7 +89,8 @@ namespace BWEB {
+             auto ptr = defenses.find(row);
+             if (ptr != defenses.end())
+                 return (ptr->second);
+-            return {};
++            static const std::set<BWAPI::TilePosition> empty;
++            return empty;
+         }
+ 
+         /// <summary> Returns the TilePosition belonging to the opening of the wall. </summary>
+diff --git a/Source/McRave/Info/Unit/Units.cpp b/Source/McRave/Info/Unit/Units.cpp
+index a2defd0..b291b5c 100644
+--- a/Source/McRave/Info/Unit/Units.cpp
++++ b/Source/McRave/Info/Unit/Units.cpp
+@@ -280,7 +280,7 @@ namespace McRave::Units {
+                         continue;
+ 
+                     int color     = unit.getPlayer()->getColor();
+-                    int textColor = color == 185 ? textColor = Text::DarkGreen : unit.getPlayer()->getTextColor();
++                    int textColor = color == 185 ? Text::DarkGreen : unit.getPlayer()->getTextColor();
+ 
+                     int width = unit.getType().isBuilding() ? -16 : unit.getType().width() / 2;
+                     if (unit.getRole() == Role::Production && (unit.getType() == UnitTypes::Zerg_Egg || (unit.unit()->isTraining() && !unit.unit()->getTrainingQueue().empty()))) {
+diff --git a/Source/McRave/Macro/Producing/Producing.cpp b/Source/McRave/Macro/Producing/Producing.cpp
+index 93c6f48..61760bf 100644
+--- a/Source/McRave/Macro/Producing/Producing.cpp
++++ b/Source/McRave/Macro/Producing/Producing.cpp
+@@ -53,7 +53,7 @@ namespace McRave::Producing {
+         {
+             // Whether something is creatable is determined mostly by ordering it up in the build order, this checks edge cases
+             if (unit == Terran_Siege_Tank_Tank_Mode || unit == Terran_Valkyrie || unit == Terran_Battlecruiser || unit == Terran_Science_Vessel || unit == Terran_Dropship)
+-                return building->getAddon() != nullptr;
++                return building && building->getAddon() != nullptr;
+             return true;
+         }
+ 
+diff --git a/Source/McRave/Main/Visuals.cpp b/Source/McRave/Main/Visuals.cpp
+index bc93058..671fd76 100644
+--- a/Source/McRave/Main/Visuals.cpp
++++ b/Source/McRave/Main/Visuals.cpp
+@@ -247,7 +247,7 @@ namespace McRave::Visuals {
+ 
+     bool isDrawingEnabled(DrawingType type) { return Util::contains(enabledDrawings, type); }
+ 
+-    Text::Enum getTextColor() {}
++    Text::Enum getTextColor() { return Text::Default; }
+ 
+     void centerCameraOn(Position here) { Broodwar->setScreenPosition(here - Position(320, 180)); }
+ 
+@@ -256,7 +256,7 @@ namespace McRave::Visuals {
+         // TODO: This is obviously not doing anything, but I wrote it at some point for "fixing" dark green, but this doesn't work
+         // BWAPIs green text doesn't point to the right color so this will be seen occasionally
+         int color     = Broodwar->self()->getColor();
+-        int textColor = color == 185 ? textColor = Text::DarkGreen : Broodwar->self()->getTextColor();
++        int textColor = color == 185 ? Text::DarkGreen : Broodwar->self()->getTextColor();
+ 
+         enabledDrawings.push_back(DrawingType::Builds);
+         enabledDrawings.push_back(DrawingType::Scores);
+diff --git a/Source/McRave/Map/Walls/Walls.cpp b/Source/McRave/Map/Walls/Walls.cpp
+index 01b1dc1..d12c31d 100644
+--- a/Source/McRave/Map/Walls/Walls.cpp
++++ b/Source/McRave/Map/Walls/Walls.cpp
+@@ -355,9 +355,9 @@ namespace McRave::Walls {
+ 
+     int needGroundDefenses(BWEB::Wall *const wall) { return desiredGroundDefenses[wall]; }
+     int needAirDefenses(BWEB::Wall *const wall) { return desiredAirDefenses[wall]; }
+-    int getCompleteTypeCount(BWEB::Wall *const wall, UnitType type) {}
+-    int getIncompleteTypeCount(BWEB::Wall *const wall, UnitType type) {}
+-    int getTotalTypeCount(BWEB::Wall *const wall, UnitType type) {}
++    int getCompleteTypeCount(BWEB::Wall *const wall, UnitType type) { return 0; }
++    int getIncompleteTypeCount(BWEB::Wall *const wall, UnitType type) { return 0; }
++    int getTotalTypeCount(BWEB::Wall *const wall, UnitType type) { return 0; }
+     BWEB::Wall *const getMainWall() { return mainWall; }
+     BWEB::Wall *const getNaturalWall() { return naturalWall; }
+ } // namespace McRave::Walls
+\ No newline at end of file
+diff --git a/Source/McRave/Micro/Combat/Clusters.cpp b/Source/McRave/Micro/Combat/Clusters.cpp
+index e29945a..c22a2ff 100644
+--- a/Source/McRave/Micro/Combat/Clusters.cpp
++++ b/Source/McRave/Micro/Combat/Clusters.cpp
+@@ -115,7 +115,7 @@ namespace McRave::Combat::Clusters {
+             // Every other node looks at neighbor and tries to add it, if enough neighbors
+             int x = 0;
+             while (!nodeQueue.empty()) {
+-                auto &node = nodeQueue.front();
++                auto node = nodeQueue.front();
+                 nodeQueue.pop();
+ 
+                 if (int(newCluster.units.size()) >= maxsize && !node->unit->isFlying())
+diff --git a/Source/McRave/Micro/Combat/State.cpp b/Source/McRave/Micro/Combat/State.cpp
+index 1e5b525..c0296d1 100644
+--- a/Source/McRave/Micro/Combat/State.cpp
++++ b/Source/McRave/Micro/Combat/State.cpp
+@@ -30,7 +30,7 @@ namespace McRave::Combat::State {
+         }
+ 
+         // Carriers
+-        static bool carrierCountReady = carrierCountReady || com(Protoss_Carrier) >= 4;
++        static bool carrierCountReady = com(Protoss_Carrier) >= 4;
+         if (!BuildOrder::isPressure(Protoss_Carrier) && unlockedOrVis(Protoss_Carrier)) {
+             if (Players::PvT()) {
+                 if (!carrierCountReady)

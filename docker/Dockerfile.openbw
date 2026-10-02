@@ -1,0 +1,63 @@
+# syntax=docker/dockerfile:1
+# OpenBW + OpenBW/bwapi fork, headless (no SDL2), Release build.
+# Mirrors docs/setup_openbw.md. Build context must be the repo root
+# (it copies body/patches/openbw/*.patch).
+#
+# UNTESTED: the docker daemon was not reachable in the container where this
+# file was written; the same commands were verified directly on Ubuntu 24.04
+# with gcc 13.3 / cmake 3.28 / ninja (see docs/setup_openbw.md).
+#
+#   docker build -f docker/Dockerfile.openbw -t sc_ai/openbw .
+#   docker run --rm -v /path/to/mpq:/data/mpq:ro -e OPENBW_MPQ_PATH=/data/mpq \
+#       sc_ai/openbw BWAPILauncher
+#
+# Game data (Patch_rt.mpq, BrooDat.mpq, StarDat.mpq) is NOT in the image; mount it.
+
+ARG UBUNTU_TAG=24.04
+FROM ubuntu:${UBUNTU_TAG} AS build
+
+ARG OPENBW_REF=4b046d5f65302b10cb0a745f0fecd37ec85b20a8
+ARG BWAPI_REF=48124ba8ed1b4d52b3dfd52acbaf34afb9a37fe2
+ARG JOBS=4
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential g++ cmake ninja-build git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/src
+RUN git clone https://github.com/OpenBW/openbw openbw \
+    && git -C openbw checkout ${OPENBW_REF} \
+    && git clone https://github.com/OpenBW/bwapi openbw-bwapi \
+    && git -C openbw-bwapi checkout ${BWAPI_REF}
+
+# gcc 13: Game.h needs <cstdint>
+COPY body/patches/openbw/ /opt/src/patches/
+RUN cd openbw-bwapi && for p in /opt/src/patches/*.patch; do git apply "$p"; done
+
+RUN cmake -S openbw-bwapi -B openbw-bwapi/build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DOPENBW_DIR=/opt/src/openbw \
+        -DOPENBW_ENABLE_UI=0 \
+        -DCMAKE_INSTALL_PREFIX=/opt/openbw \
+    && cmake --build openbw-bwapi/build -j ${JOBS} \
+    && cmake --install openbw-bwapi/build
+# /opt/openbw/bin/BWAPILauncher, /opt/openbw/lib/{libBWAPI,libBWAPILIB,libOpenBWData}.so,
+# /opt/openbw/include/BWAPI*.  ExampleAIModule.so / TestAIModule.so stay in the build tree:
+RUN cp openbw-bwapi/build/lib/ExampleAIModule.so openbw-bwapi/build/lib/TestAIModule.so /opt/openbw/lib/
+
+# ---------------------------------------------------------------------------
+FROM ubuntu:${UBUNTU_TAG} AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /opt/openbw /opt/openbw
+ENV PATH=/opt/openbw/bin:$PATH \
+    LD_LIBRARY_PATH=/opt/openbw/lib \
+    OPENBW_ENABLE_UI=0 \
+    OPENBW_GAME_SPEED=0 \
+    OPENBW_MPQ_PATH=/data/mpq \
+    BWAPI_CONFIG_AUTO_MENU__AUTO_RESTART=OFF
+# Run directory: bwapi-data/, maps/ are resolved relative to cwd.
+WORKDIR /game
+VOLUME ["/data/mpq", "/game"]
+CMD ["BWAPILauncher"]

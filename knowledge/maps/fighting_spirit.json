@@ -1,0 +1,12 @@
+{
+  "map": "Fighting Spirit",
+  "_source": "placeholder until tools/map_knowledge_from_dump.py runs",
+  "_note": "No positions and no walls until the body map dump is converted (tools/map_knowledge_from_dump.py) and human-reviewed. Names here are the only ones the validator accepts.",
+  "matchup_defaults": {
+    "ZvT": {"wall_natural": "none", "third": "B", "sunken_spots": ["nat_mineral_front"]},
+    "ZvP": {"wall_natural": "none", "third": "B", "sunken_spots": ["nat_choke_inner"]}
+  },
+  "walls": {},
+  "expansions": {"A": {}, "B": {}, "C": {}},
+  "notes": ["Placeholder notes: 4-player map, natural has one main choke; third B is toward the closest corner base."]
+}

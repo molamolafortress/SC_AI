@@ -1,0 +1,12 @@
+diff --git a/bwapi/include/BWAPI/Game.h b/bwapi/include/BWAPI/Game.h
+index ccf26f5..6f79cdb 100755
+--- a/bwapi/include/BWAPI/Game.h
++++ b/bwapi/include/BWAPI/Game.h
+@@ -2,6 +2,7 @@
+ #include <list>
+ #include <string>
+ #include <cstdarg>
++#include <cstdint>
+ #include <vector>
+ #include <tuple>
+ 

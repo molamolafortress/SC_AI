@@ -1,0 +1,13 @@
+diff --git a/UAlbertaBot/Source/Config.cpp b/UAlbertaBot/Source/Config.cpp
+index eb711d9..7665efe 100644
+--- a/UAlbertaBot/Source/Config.cpp
++++ b/UAlbertaBot/Source/Config.cpp
+@@ -12,7 +12,7 @@ namespace Config
+     {
+         bool ConfigFileFound                = false;
+         bool ConfigFileParsed               = false;
+-        std::string ConfigFileLocation      = "UAlbertaBot_Config.txt";
++        std::string ConfigFileLocation      = "bwapi-data/AI/UAlbertaBot_Config.txt";
+     }
+ 
+     namespace Strategy

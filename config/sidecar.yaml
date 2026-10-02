@@ -1,0 +1,32 @@
+mode: headless          # lockstep | realtime | headless | replay-directive
+host: 127.0.0.1
+port: 8770
+llm_backend: claude-cli # anthropic | claude-cli | fake | recorded   (claude-cli uses the Claude Code login, no API key)
+directive_ttl_seconds: 90
+budgets:
+  per_game_usd: 3.0
+  per_day_usd: 30.0
+triggers:
+  safety_interval_seconds: 90
+  idle_minerals: 800
+  idle_minerals_seconds: 10
+  big_engagement_loss_value: 200
+  min_hold_seconds: 20
+  min_call_gap_seconds: 20
+  decide_at_start: false        # true: call the LLM at frame 0 (old behaviour); false: body defaults until first scouting info or 2:00
+  first_call_deadline_seconds: 120
+  series_interval_seconds: 30
+  series_max_rows: 40
+models:
+  strategy_model: claude-opus-5-5
+  strategy_effort_regular: low
+  strategy_effort_transition: medium
+  advisor_model: claude-haiku-4-5
+  advisor_enabled: false
+levers:
+  # Ablation 2026-10-01 (ZvZ mirror, 12 games each): static_defense requests cost drones and lowered the win rate
+  # (full 5/12 vs without static_defense 7/12, drones at 6:00 9.7 -> 11.4). Disabled until a smarter gate exists.
+  # Economy lever 2026-10-02 (same setup, 12 games): drone_target 4/12 vs 7/12 without it; the body stops droning
+  # once the LLM's (small, incremental) total is reached, so drones at 6:00 fell 11.4 -> 9.4. Disabled pending a
+  # floor-only or priority-only redesign (docs/eval_log.md).
+  disabled: [static_defense, drone_target]
