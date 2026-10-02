@@ -26,4 +26,7 @@ models:
 levers:
   # Ablation 2026-10-01 (ZvZ mirror, 12 games each): static_defense requests cost drones and lowered the win rate
   # (full 5/12 vs without static_defense 7/12, drones at 6:00 9.7 -> 11.4). Disabled until a smarter gate exists.
-  disabled: [static_defense]
+  # Economy lever 2026-10-02 (same setup, 12 games): drone_target 4/12 vs 7/12 without it; the body stops droning
+  # once the LLM's (small, incremental) total is reached, so drones at 6:00 fell 11.4 -> 9.4. Disabled pending a
+  # floor-only or priority-only redesign (docs/eval_log.md).
+  disabled: [static_defense, drone_target]
