@@ -55,6 +55,7 @@ OPPONENT_DATA_DIRS = {
 # Modules are Windows DLLs; an opponent may be a directory (copied whole into bwapi-data/AI, first *.dll is the module).
 OPPONENTS_WINE = {
     "pluto": ("third_party/pluto", "Random"),  # tscmoo/pluto CoG 2026 release: pluto.dll + pluto/{pluto_infer.exe,pluto_weights.bin}
+    "pluto_zerg": ("third_party/pluto", "Zerg"),  # same, race fixed: the stage-1 ZvZ test bed (docs/eval_log.md 2026-10-02)
     "mcrave": ("build/mcrave_win/McRave.dll", "Zerg"),  # our own body, pristine (baseline check of the lane)
 }
 WINE_OUR_MODULE = "build/mcrave_win/McRave.dll"
