@@ -1,6 +1,6 @@
 # SC_AI — LLM strategy layer on a Brood War bot body
 
-Read `docs/design_v0.5.md` (what we build) and `docs/design_review_2026-09.md` (why) before changing anything.
+Read `docs/design_v0.5.md` (what we build), `docs/design_review_2026-09.md` (why) and `docs/roadmap.md` (milestones, what is decided and what is deferred) before changing anything.
 
 ## Layout
 - `bot/sidecar/` Python sidecar: HTTP loopback server, state store, summarizer, plan ledger, validator, strategy caller, LLM backends (`anthropic|fake|recorded`), JSONL logger.
@@ -21,6 +21,7 @@ python -m eval.run_eval --runner openbw --games 3 --parallel 3 --opponent zzzkbo
 python -m eval.run_eval --runner openbw --games 3 --parallel 3 --opponent mcrave --strategy llm --llm claude-cli
 python -m eval.compare eval/results/<a>/metrics.json eval/results/<b>/metrics.json
 ```
+`--runner wine --opponent pluto` plays real StarCraft 1.16.1 under Wine against Pluto (`docs/setup_pluto_lane.md`; needs `build/mcrave_win/McRave.dll` from `body/mcrave_port/build_win.sh` and `third_party/bw_win/template`).
 Opponents (`eval/run_eval.py` OPPONENTS): `probe` (idle), `mcrave` (pristine body), `zzzkbot`, `ualbertabot`. Real games need
 `third_party/game-data` (MPQs + maps, see `docs/setup_openbw.md` §7) and the built bots (`build/*/*.so`, see `body/*_port/README.md`).
 `--strategy fixed` runs the sidecar in observe-only mode (logs, no overrides); `--max-frames` caps games (timeout = not a win).

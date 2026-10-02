@@ -93,4 +93,4 @@ launch "$RUN/p2" B_ENV join "$B_RACE" "$B_NAME" & P2=$!
 wait $P1 || true; wait $P2 || true
 # A finished game leaves a replay on the host side; the authoritative result is the sidecar's `result` record (our side)
 # and bwapi-data/write/pluto_bandit_*.txt (Pluto's own end record) on the opponent side.
-if ls "$RUN"/p?/bwapi-data/write/game.rep >/dev/null 2>&1; then echo "finished run_dir=$RUN"; else echo "unfinished run_dir=$RUN"; tail -3 "$RUN"/p?/launcher.log; exit 1; fi
+if ls "$RUN"/p?/bwapi-data/write/game.rep >/dev/null 2>&1; then echo "finished run_dir=$RUN"; else echo "unfinished run_dir=$RUN"; tail -n 3 "$RUN"/p?/launcher.log; exit 1; fi
