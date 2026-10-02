@@ -22,7 +22,13 @@
 #include <optional>
 #include <string>
 #include <thread>
+#if defined(_WIN32)
+#include <process.h>
+#define SC_AI_GETPID _getpid
+#else
 #include <unistd.h>
+#define SC_AI_GETPID ::getpid
+#endif
 
 #define CPPHTTPLIB_NO_EXCEPTIONS
 #include "third_party/httplib.h"
@@ -200,7 +206,7 @@ private:
         std::strftime(buf, sizeof buf, "%Y%m%dT%H%M%S", std::localtime(&now));
         std::string map = BWAPI::Broodwar->mapFileName();
         for (auto& c : map) if (!isalnum(static_cast<unsigned char>(c))) c = '_';
-        return std::string(buf) + "_" + map + "_" + std::to_string(static_cast<long>(::getpid()));
+        return std::string(buf) + "_" + map + "_" + std::to_string(static_cast<long>(SC_AI_GETPID()));
     }
 
     std::string host_;

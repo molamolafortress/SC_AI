@@ -51,6 +51,13 @@ OPPONENTS = {  # name -> (module .so, race). Extend as more bots are ported to O
 OPPONENT_DATA_DIRS = {
     "ualbertabot": "body/ualbertabot_port/bwapi-data",  # AI/UAlbertaBot_Config.txt
 }
+# --runner wine: real StarCraft 1.16.1 + BWAPI 4.4.0 under Wine (tools/run_game_wine.sh, docs/setup_pluto_lane.md).
+# Modules are Windows DLLs; an opponent may be a directory (copied whole into bwapi-data/AI, first *.dll is the module).
+OPPONENTS_WINE = {
+    "pluto": ("third_party/pluto", "Random"),  # tscmoo/pluto CoG 2026 release: pluto.dll + pluto/{pluto_infer.exe,pluto_weights.bin}
+    "mcrave": ("build/mcrave_win/McRave.dll", "Zerg"),  # our own body, pristine (baseline check of the lane)
+}
+WINE_OUR_MODULE = "build/mcrave_win/McRave.dll"
 
 
 def run_openbw(cfg: SidecarConfig, args, out_dir: Path) -> None:
@@ -62,8 +69,13 @@ def run_openbw(cfg: SidecarConfig, args, out_dir: Path) -> None:
     from concurrent.futures import ThreadPoolExecutor
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    our = Path(args.our_module).resolve()
-    opp_so, opp_race = OPPONENTS[args.opponent]
+    wine = args.runner == "wine"
+    script = "tools/run_game_wine.sh" if wine else "tools/run_game_openbw.sh"
+    table = OPPONENTS_WINE if wine else OPPONENTS
+    if args.opponent not in table:
+        raise SystemExit(f"unknown opponent for --runner {args.runner}: {args.opponent} (have {sorted(table)})")
+    our = Path(WINE_OUR_MODULE if (wine and args.our_module == ap_default_module) else args.our_module).resolve()
+    opp_so, opp_race = table[args.opponent]
     opp = Path(opp_so).resolve()
     for p in (our, opp):
         if not p.exists():
@@ -86,7 +98,7 @@ def run_openbw(cfg: SidecarConfig, args, out_dir: Path) -> None:
         def one(i: int) -> str:
             run_dir = out_dir / "games" / f"{i:03d}"
             side = "p2" if (args.alternate_sides and i % 2 == 1) else "p1"
-            r = subprocess.run(["tools/run_game_openbw.sh", str(our), str(opp), args.map, "Zerg", opp_race, str(run_dir), f"g{i}"],
+            r = subprocess.run([script, str(our), str(opp), args.map, "Zerg", opp_race, str(run_dir), f"g{i}"],
                                env=dict(game_env, OUR_SIDE=side), capture_output=True, text=True)
             line = (r.stdout.strip().splitlines() or ["?"])[-1]
             print(f"game {i} ({side}): {line}", flush=True)
@@ -99,13 +111,16 @@ def run_openbw(cfg: SidecarConfig, args, out_dir: Path) -> None:
         sidecar.wait(10)
 
 
+ap_default_module = "build/mcrave/McRave.so"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--games", type=int, default=30)
     ap.add_argument("--opponent", default="probe")
     ap.add_argument("--map", default="maps/BroodWar/sscai/(4)FightingSpirit.scx")
     ap.add_argument("--strategy", default="fixed", choices=["fixed", "random", "llm"])
-    ap.add_argument("--runner", default="mock", choices=["mock", "openbw"])
+    ap.add_argument("--runner", default="mock", choices=["mock", "openbw", "wine"])
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--config", default="config/sidecar.yaml")
     ap.add_argument("--parallel", type=int, default=1)
@@ -118,22 +133,20 @@ def main() -> None:
     ap.add_argument("--disable-levers", default="", help="comma list of directive levers reset to no-override (ablation)")
     ap.add_argument("--max-frames", type=int, default=43200, help="frame cap per game (30 game-minutes); leaving counts as timeout")
     ap.add_argument("--llm", default=None, choices=["anthropic", "claude-cli", "fake", "recorded"], help="backend for --strategy llm")
-    ap.add_argument("--our-module", default="build/mcrave/McRave.so")
+    ap.add_argument("--our-module", default=ap_default_module)
     args = ap.parse_args()
 
     run_id = f"{time.strftime('%Y%m%d_%H%M%S')}_{args.runner}_{args.opponent}_{args.strategy}{('_no-' + args.disable_levers.replace(',', '-')) if args.disable_levers else ''}_s{args.seed}"
     out_dir = Path("eval/results") / run_id
     cfg = SidecarConfig.load(args.config, logs_dir=out_dir / "logs", mode="lockstep" if args.lockstep else "headless")
-    if args.runner == "openbw":
+    if args.runner in ("openbw", "wine"):
         run_openbw(cfg, args, out_dir)
     else:
         run_mock(cfg, args.games, args.seed, args.strategy)
     if args.strategy == "llm":
         backend = args.llm or cfg.llm_backend
-        if backend == "fake" and args.runner == "openbw":
-            backend = "claude-cli"
     else:
-        backend = "observe" if args.runner == "openbw" else "fake"
+        backend = "observe" if args.runner in ("openbw", "wine") else "fake"
     metrics = {"run_id": run_id, "args": vars(args), "mode": cfg.mode, "lockstep": args.lockstep,
                "alternate_sides": args.alternate_sides, "safety_interval_seconds": cfg.triggers.safety_interval_seconds,
                "decide_at_start": cfg.triggers.decide_at_start, "strategy": args.strategy, "strategy_backend": backend,
