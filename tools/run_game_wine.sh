@@ -6,7 +6,9 @@
 #   holds pluto.dll + pluto/{pluto_infer.exe,pluto_weights.bin}); the first *.dll in it is the module.
 # Env: BW_WIN (StarCraft 1.16.1 install template: StarCraft.exe, *.mpq, maps/, bwapi-data/BWAPI.dll, bwheadless.exe; default third_party/bw_win/template),
 #      WINEPREFIX (default third_party/wineprefix), TIMEOUT (default 1800 s wall), SPEED (bwapi.ini speed_override, default 0 = fastest),
-#      OUR_SIDE p1|p2 (default p1; p1 hosts), SIDECAR_HOST/PORT and SC_AI_* passed to our side only (see tools/run_game_openbw.sh).
+#      OUR_SIDE p1|p2 (default p1; p1 hosts), SIDECAR_HOST/PORT and SC_AI_* passed to our side only (see tools/run_game_openbw.sh),
+#      OPP_PERSIST_DIR (optional): the opponent's bwapi-data/write is seeded from this dir (as read/) before the game and copied
+#      back after, the way tournament managers carry a bot's state between games (Pluto's per-opponent opening bandit lives there).
 set -euo pipefail
 OUR=$1; OPP=$2; MAP=$3; RACE=${4:-Zerg}; ERACE=${5:-Random}
 RUN=${6:-logs/wine/$(date +%Y%m%d_%H%M%S)_$$}; TAG=${7:-game}
@@ -84,13 +86,15 @@ theirs=(-u SIDECAR_HOST -u SIDECAR_PORT -u SC_AI_MAX_FRAMES -u SC_AI_LOCKSTEP -u
 launch() {  # dir, env-array-name, host|join, race, name
   local d=$1; local -n e=$2; local mode=$3 race=$4 name=$5; local extra=()
   [ "$mode" = host ] && extra=(-h -m "$d/$MAP") || extra=(-j)
-  ( cd "$d" && env "${e[@]}" timeout "$TIMEOUT" wine "$d/bwheadless.exe" -e "$d/StarCraft.exe" --installpath "$d" -l "$d/bwapi-data/BWAPI.dll" \
+  ( cd "$d" && env "${e[@]}" timeout "$TIMEOUT" ${DISPLAY:+} ${DISPLAY:-xvfb-run -a} wine "$d/bwheadless.exe" -e "$d/StarCraft.exe" --installpath "$d" -l "$d/bwapi-data/BWAPI.dll" \
       --localpc -n "$name" -g "$TAG" -r "$race" "${extra[@]}" > "$d/launcher.log" 2>&1 )
 }
+if [ -n "${OPP_PERSIST_DIR:-}" ] && [ -d "$OPP_PERSIST_DIR" ]; then cp -r "$OPP_PERSIST_DIR"/. "$RUN/$OPP_SIDE/bwapi-data/read/"; fi
 launch "$RUN/p1" A_ENV host "$A_RACE" "$A_NAME" & P1=$!
 sleep 4
 launch "$RUN/p2" B_ENV join "$B_RACE" "$B_NAME" & P2=$!
 wait $P1 || true; wait $P2 || true
+if [ -n "${OPP_PERSIST_DIR:-}" ]; then mkdir -p "$OPP_PERSIST_DIR"; cp -r "$RUN/$OPP_SIDE/bwapi-data/write"/. "$OPP_PERSIST_DIR/" 2>/dev/null || true; fi
 # A finished game leaves a replay on the host side; the authoritative result is the sidecar's `result` record (our side)
 # and bwapi-data/write/pluto_bandit_*.txt (Pluto's own end record) on the opponent side.
 if ls "$RUN"/p?/bwapi-data/write/game.rep >/dev/null 2>&1; then echo "finished run_dir=$RUN"; else echo "unfinished run_dir=$RUN"; tail -n 3 "$RUN"/p?/launcher.log; exit 1; fi

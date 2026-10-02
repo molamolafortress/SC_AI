@@ -94,6 +94,9 @@ def run_openbw(cfg: SidecarConfig, args, out_dir: Path) -> None:
         game_env["SIDECAR_LOGS_DIR"] = str(cfg.logs_dir)
         if args.opponent in OPPONENT_DATA_DIRS:
             game_env["OPP_DATA_DIR"] = str(Path(OPPONENT_DATA_DIRS[args.opponent]).resolve())
+        if wine:  # opponent state (Pluto's opening bandit + game records) carries across the run's games, as on a ladder
+            game_env.setdefault("OPP_PERSIST_DIR", str((out_dir / "opp_state").resolve()))  # env override: share across chunked runs
+            game_env.setdefault("TIMEOUT", "3600")
 
         def one(i: int) -> str:
             run_dir = out_dir / "games" / f"{i:03d}"
